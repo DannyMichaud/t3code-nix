@@ -42,6 +42,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
+import { ProviderUsageTrackerLive } from "./provider/Layers/ProviderUsageTracker";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
@@ -192,6 +193,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(ProviderLayerLive),
+  Layer.provideMerge(ProviderUsageTrackerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),

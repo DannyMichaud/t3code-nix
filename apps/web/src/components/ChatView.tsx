@@ -155,6 +155,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
+import { UsageLimitsWidget } from "./chat/UsageLimitsWidget";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -4368,6 +4369,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         }
                         className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                       >
+                        <UsageLimitsWidget usageLimits={activeProviderStatus?.usageLimits} />
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />
                         ) : null}

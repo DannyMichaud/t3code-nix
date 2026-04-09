@@ -51,3 +51,7 @@ Docs:
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Manual Verification
+
+If the user wants to manually verify your changes, always use use run-dev.sh to start a dev mode t3 code terminal.

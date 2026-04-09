@@ -7,6 +7,7 @@
  * @module CodexAdapterLive
  */
 import {
+  EventId,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ProviderEvent,
@@ -22,7 +23,7 @@ import {
   TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
+import { Effect, Exit, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -40,6 +41,7 @@ import {
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { extractCodexRateLimitSnapshot, selectCodexRateLimitSnapshot } from "../codexRateLimits.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
@@ -1178,7 +1180,7 @@ function mapToRuntimeEvents(
         type: "account.rate-limits.updated",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          rateLimits: event.payload ?? {},
+          rateLimits: extractCodexRateLimitSnapshot(event.payload) ?? event.payload ?? {},
         },
       },
     ];
@@ -1430,7 +1432,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             detail: toMessage(cause, "Failed to start Codex adapter session."),
             cause,
           }),
-      });
+      }).pipe(Effect.tap(() => enqueueBootstrapRateLimits(input.threadId)));
     },
   );
 
@@ -1582,6 +1584,53 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     yield* nativeEventLogger.write(event, event.threadId);
+  });
+
+  const enqueueBootstrapRateLimits = Effect.fn("enqueueBootstrapRateLimits")(function* (
+    threadId: ThreadId,
+  ) {
+    const readResult = yield* Effect.exit(
+      Effect.tryPromise({
+        try: () => manager.readRateLimits(threadId),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "account/rateLimits/read",
+            detail: toMessage(cause, "Failed to read Codex rate limits."),
+            cause,
+          }),
+      }),
+    );
+
+    if (Exit.isFailure(readResult)) {
+      yield* Effect.logWarning("failed to bootstrap Codex rate limits", {
+        provider: PROVIDER,
+        threadId,
+        cause: readResult.cause,
+      });
+      return;
+    }
+
+    const snapshot = selectCodexRateLimitSnapshot(readResult.value);
+    if (snapshot === null) {
+      yield* Effect.logWarning("Codex rate-limit bootstrap returned no snapshot", {
+        provider: PROVIDER,
+        threadId,
+        response: readResult.value,
+      });
+      return;
+    }
+
+    yield* Queue.offer(runtimeEventQueue, {
+      eventId: EventId.makeUnsafe(crypto.randomUUID()),
+      provider: PROVIDER,
+      threadId,
+      createdAt: new Date().toISOString(),
+      type: "account.rate-limits.updated",
+      payload: {
+        rateLimits: snapshot,
+      },
+    } satisfies ProviderRuntimeEvent);
   });
 
   const registerListener = Effect.fn("registerListener")(function* () {

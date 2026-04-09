@@ -28,6 +28,7 @@ import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReac
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerSettingsService } from "./serverSettings";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { ProviderUsageTracker } from "./provider/Services/ProviderUsageTracker.ts";
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -262,6 +263,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
   const orchestrationReactor = yield* OrchestrationReactor;
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
+  const providerUsageTracker = yield* ProviderUsageTracker;
 
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
@@ -304,6 +306,12 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
     yield* runStartupPhase(
       "reactors.start",
       orchestrationReactor.start().pipe(Scope.provide(reactorScope)),
+    );
+
+    yield* Effect.logDebug("startup phase: starting provider usage tracker");
+    yield* runStartupPhase(
+      "provider-usage.start",
+      providerUsageTracker.start().pipe(Scope.provide(reactorScope)),
     );
 
     yield* Effect.logDebug("startup phase: preparing welcome payload");

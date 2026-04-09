@@ -771,6 +771,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     });
   }
 
+  async readRateLimits(threadId: ThreadId): Promise<unknown> {
+    const context = this.requireSession(threadId);
+    return await this.sendRequest(context, "account/rateLimits/read", {});
+  }
+
   async readThread(threadId: ThreadId): Promise<CodexThreadSnapshot> {
     const context = this.requireSession(threadId);
     const providerThreadId = readResumeThreadId({

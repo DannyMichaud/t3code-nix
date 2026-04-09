@@ -159,6 +159,55 @@ function createBaseServerConfig(): ServerConfig {
   };
 }
 
+function createCodexUsageLimits() {
+  return {
+    updatedAt: NOW_ISO,
+    limitId: "codex",
+    limitName: "Codex",
+    windows: [
+      {
+        label: "5h",
+        durationMinutes: 300,
+        usedPercent: 42,
+      },
+      {
+        label: "7d",
+        durationMinutes: 10_080,
+        usedPercent: 18,
+      },
+    ],
+  } as const;
+}
+
+function appendContextWindowActivity(snapshot: OrchestrationReadModel): OrchestrationReadModel {
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread, index) =>
+      index !== 0
+        ? thread
+        : {
+            ...thread,
+            activities: [
+              ...thread.activities,
+              {
+                id: EventId.makeUnsafe("activity-context-window"),
+                tone: "info",
+                kind: "context-window.updated",
+                summary: "Context window updated",
+                payload: {
+                  usedTokens: 81_659,
+                  maxTokens: 258_400,
+                  totalProcessedTokens: 748_126,
+                },
+                turnId: null,
+                createdAt: NOW_ISO,
+              },
+            ],
+          },
+    ),
+  };
+}
+
 function createUserMessage(options: {
   id: MessageId;
   text: string;
@@ -3144,6 +3193,150 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders Codex usage pills next to the context window meter", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: appendContextWindowActivity(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-user-usage-with-context" as MessageId,
+          targetText: "usage with context",
+        }),
+      ),
+      configureFixture: (nextFixture) => {
+        const codexProvider = nextFixture.serverConfig.providers[0];
+        if (!codexProvider) {
+          throw new Error("Expected a default Codex provider in the fixture.");
+        }
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              ...codexProvider,
+              usageLimits: createCodexUsageLimits(),
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await vi.waitFor(() => {
+        const footer = document.querySelector<HTMLElement>('[data-chat-composer-actions="right"]');
+        const usageWidget = footer?.querySelector<HTMLElement>(
+          '[data-testid="usage-limits-widget"]',
+        );
+        const contextMeter = footer?.querySelector<HTMLButtonElement>(
+          'button[aria-label^="Context window"]',
+        );
+
+        expect(footer).toBeTruthy();
+        expect(usageWidget?.textContent).toContain("5h");
+        expect(usageWidget?.textContent).toContain("7d");
+        expect(contextMeter).toBeTruthy();
+        expect(Array.from(footer?.children ?? []).indexOf(usageWidget as HTMLElement)).toBeLessThan(
+          Array.from(footer?.children ?? []).indexOf(contextMeter as HTMLButtonElement),
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders Codex usage pills even when no context window meter is available", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-usage-only" as MessageId,
+        targetText: "usage only",
+      }),
+      configureFixture: (nextFixture) => {
+        const codexProvider = nextFixture.serverConfig.providers[0];
+        if (!codexProvider) {
+          throw new Error("Expected a default Codex provider in the fixture.");
+        }
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              ...codexProvider,
+              usageLimits: createCodexUsageLimits(),
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-testid="usage-limits-widget"]')?.textContent,
+        ).toContain("5h");
+        expect(document.querySelector('button[aria-label^="Context window"]')).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides the usage widget when the selected provider has no supported limits", async () => {
+    const hiddenUsageSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-usage-hidden" as MessageId,
+      targetText: "usage hidden",
+    });
+    const hiddenUsageThreads = [...hiddenUsageSnapshot.threads];
+    const firstHiddenUsageThread = hiddenUsageThreads[0];
+    if (firstHiddenUsageThread) {
+      hiddenUsageThreads[0] = {
+        ...firstHiddenUsageThread,
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-20250514",
+        },
+      };
+    }
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...hiddenUsageSnapshot,
+        threads: hiddenUsageThreads,
+      },
+      configureFixture: (nextFixture) => {
+        const codexProvider = nextFixture.serverConfig.providers[0];
+        if (!codexProvider) {
+          throw new Error("Expected a default Codex provider in the fixture.");
+        }
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              ...codexProvider,
+              usageLimits: createCodexUsageLimits(),
+            },
+            {
+              provider: "claudeAgent",
+              enabled: true,
+              installed: true,
+              version: "1.0.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: NOW_ISO,
+              models: [],
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-testid="usage-limits-widget"]')).toBeNull();
+      });
     } finally {
       await mounted.cleanup();
     }

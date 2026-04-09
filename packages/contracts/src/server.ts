@@ -56,6 +56,21 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+export const ServerProviderUsageLimitWindow = Schema.Struct({
+  label: TrimmedNonEmptyString,
+  durationMinutes: Schema.Number,
+  usedPercent: Schema.Number,
+});
+export type ServerProviderUsageLimitWindow = typeof ServerProviderUsageLimitWindow.Type;
+
+export const ServerProviderUsageLimits = Schema.Struct({
+  updatedAt: IsoDateTime,
+  limitId: Schema.optional(TrimmedNonEmptyString),
+  limitName: Schema.optional(TrimmedNonEmptyString),
+  windows: Schema.Array(ServerProviderUsageLimitWindow),
+});
+export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
+
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
   enabled: Schema.Boolean,
@@ -66,6 +81,7 @@ export const ServerProvider = Schema.Struct({
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
   models: Schema.Array(ServerProviderModel),
+  usageLimits: Schema.optional(ServerProviderUsageLimits),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

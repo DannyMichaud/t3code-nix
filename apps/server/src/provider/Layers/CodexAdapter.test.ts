@@ -33,6 +33,23 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
 
+const CODEX_RATE_LIMIT_SNAPSHOT = {
+  limitId: "codex",
+  limitName: "Codex",
+  primary: {
+    usedPercent: 42,
+    windowDurationMins: 300,
+    resetsAt: 1_744_070_400,
+  },
+  secondary: {
+    usedPercent: 18,
+    windowDurationMins: 10_080,
+    resetsAt: 1_744_675_200,
+  },
+  credits: null,
+  planType: "pro",
+} as const;
+
 class FakeCodexManager extends CodexAppServerManager {
   public startSessionImpl = vi.fn(
     async (input: CodexAppServerStartSessionInput): Promise<ProviderSession> => {
@@ -68,6 +85,13 @@ class FakeCodexManager extends CodexAppServerManager {
   public rollbackThreadImpl = vi.fn(async (_threadId: ThreadId, _numTurns: number) => ({
     threadId: asThreadId("thread-1"),
     turns: [],
+  }));
+
+  public readRateLimitsImpl = vi.fn(async (_threadId: ThreadId) => ({
+    rateLimits: CODEX_RATE_LIMIT_SNAPSHOT,
+    rateLimitsByLimitId: {
+      codex: CODEX_RATE_LIMIT_SNAPSHOT,
+    },
   }));
 
   public respondToRequestImpl = vi.fn(
@@ -106,6 +130,10 @@ class FakeCodexManager extends CodexAppServerManager {
 
   override rollbackThread(threadId: ThreadId, numTurns: number) {
     return this.rollbackThreadImpl(threadId, numTurns);
+  }
+
+  override readRateLimits(threadId: ThreadId) {
+    return this.readRateLimitsImpl(threadId);
   }
 
   override respondToRequest(
@@ -185,6 +213,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
   it.effect("maps codex model options before starting a session", () =>
     Effect.gen(function* () {
       validationManager.startSessionImpl.mockClear();
+      validationManager.readRateLimitsImpl.mockClear();
       const adapter = yield* CodexAdapter;
 
       yield* adapter.startSession({
@@ -208,6 +237,34 @@ validationLayer("CodexAdapterLive validation", (it) => {
         serviceTier: "fast",
         runtimeMode: "full-access",
       });
+      assert.equal(validationManager.readRateLimitsImpl.mock.calls[0]?.[0], asThreadId("thread-1"));
+    }),
+  );
+
+  it.effect("emits one bootstrap account rate-limits update after session start", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      validationManager.readRateLimitsImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        runtimeMode: "full-access",
+      });
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(validationManager.readRateLimitsImpl.mock.calls.length, 1);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "account.rate-limits.updated");
+      if (firstEvent.value.type !== "account.rate-limits.updated") {
+        return;
+      }
+      assert.deepStrictEqual(firstEvent.value.payload.rateLimits, CODEX_RATE_LIMIT_SNAPSHOT);
     }),
   );
 });
@@ -471,6 +528,36 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.message, "Reconnecting... 2/5");
+    }),
+  );
+
+  it.effect("unwraps Codex account rate-limit notifications to the snapshot payload", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-account-rate-limits-updated"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "account/rateLimits/updated",
+        payload: {
+          rateLimits: CODEX_RATE_LIMIT_SNAPSHOT,
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "account.rate-limits.updated");
+      if (firstEvent.value.type !== "account.rate-limits.updated") {
+        return;
+      }
+      assert.deepStrictEqual(firstEvent.value.payload.rateLimits, CODEX_RATE_LIMIT_SNAPSHOT);
     }),
   );
 

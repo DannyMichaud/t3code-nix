@@ -70,6 +70,10 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import {
+  ProviderUsageTracker,
+  type ProviderUsageTrackerShape,
+} from "./provider/Services/ProviderUsageTracker.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -93,6 +97,37 @@ const defaultModelSelection = {
   provider: "codex",
   model: "gpt-5-codex",
 } as const;
+const providerUsageLimits = {
+  updatedAt: "2026-04-08T00:00:00.000Z",
+  limitId: "codex",
+  limitName: "Codex",
+  windows: [
+    {
+      label: "5h",
+      durationMinutes: 300,
+      usedPercent: 42,
+    },
+    {
+      label: "7d",
+      durationMinutes: 10_080,
+      usedPercent: 18,
+    },
+  ],
+} as const;
+const baseProvider = {
+  provider: "codex" as const,
+  enabled: true,
+  installed: true,
+  version: "0.118.0",
+  status: "ready" as const,
+  auth: { status: "authenticated" as const },
+  checkedAt: "2026-04-08T00:00:00.000Z",
+  models: [],
+};
+const providerWithUsage = {
+  ...baseProvider,
+  usageLimits: providerUsageLimits,
+};
 
 const makeDefaultOrchestrationReadModel = () => {
   const now = new Date().toISOString();
@@ -258,6 +293,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerUsageTracker?: Partial<ProviderUsageTrackerShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
@@ -325,6 +361,15 @@ const buildAppUnderTest = (options?: {
           refresh: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderUsageTracker)({
+          start: () => Effect.void,
+          getSnapshot: Effect.succeed({}),
+          decorateProviders: (providers) => Effect.succeed(providers),
+          streamChanges: Stream.empty,
+          ...options?.layers?.providerUsageTracker,
         }),
       ),
       Layer.provide(
@@ -1022,6 +1067,54 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc serverGetConfig with decorated provider usage limits", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          providerRegistry: {
+            getProviders: Effect.succeed([baseProvider]),
+          },
+          providerUsageTracker: {
+            decorateProviders: (providers) =>
+              Effect.succeed(providers.map(() => providerWithUsage)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const config = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
+      );
+
+      assert.deepEqual(config.providers, [providerWithUsage]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc serverRefreshProviders with decorated provider usage limits",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({
+          layers: {
+            providerRegistry: {
+              refresh: () => Effect.succeed([baseProvider]),
+            },
+            providerUsageTracker: {
+              decorateProviders: (providers) =>
+                Effect.succeed(providers.map(() => providerWithUsage)),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const response = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverRefreshProviders]({})),
+        );
+
+        assert.deepEqual(response.providers, [providerWithUsage]);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>
     Effect.gen(function* () {
       const providers = [] as const;
@@ -1055,6 +1148,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         version: 1,
         type: "providerStatuses",
         payload: { providers },
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc subscribeServerConfig emits usage-driven provider updates", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          keybindings: {
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+          },
+          providerRegistry: {
+            getProviders: Effect.succeed([baseProvider]),
+            streamChanges: Stream.empty,
+          },
+          providerUsageTracker: {
+            decorateProviders: (providers) =>
+              Effect.succeed(providers.map(() => providerWithUsage)),
+            streamChanges: Stream.succeed({
+              codex: providerUsageLimits,
+            }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      assert.deepEqual(second, {
+        version: 1,
+        type: "providerStatuses",
+        payload: { providers: [providerWithUsage] },
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

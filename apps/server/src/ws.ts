@@ -39,6 +39,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import { ProviderUsageTracker } from "./provider/Services/ProviderUsageTracker.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -60,6 +61,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const gitStatusBroadcaster = yield* GitStatusBroadcaster;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const providerUsageTracker = yield* ProviderUsageTracker;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
@@ -325,9 +327,13 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         );
     };
 
+    const loadDecoratedProviders = providerRegistry.getProviders.pipe(
+      Effect.flatMap((providers) => providerUsageTracker.decorateProviders(providers)),
+    );
+
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
-      const providers = yield* providerRegistry.getProviders;
+      const providers = yield* loadDecoratedProviders;
       const settings = yield* serverSettings.getSettings;
 
       return {
@@ -511,7 +517,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.serverRefreshProviders]: (_input) =>
         observeRpcEffect(
           WS_METHODS.serverRefreshProviders,
-          providerRegistry.refresh().pipe(Effect.map((providers) => ({ providers }))),
+          providerRegistry.refresh().pipe(
+            Effect.flatMap((providers) => providerUsageTracker.decorateProviders(providers)),
+            Effect.map((providers) => ({ providers })),
+          ),
           { "rpc.aggregate": "server" },
         ),
       [WS_METHODS.serverUpsertKeybinding]: (rule) =>
@@ -709,6 +718,15 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               })),
             );
             const providerStatuses = providerRegistry.streamChanges.pipe(
+              Stream.mapEffect((providers) => providerUsageTracker.decorateProviders(providers)),
+              Stream.map((providers) => ({
+                version: 1 as const,
+                type: "providerStatuses" as const,
+                payload: { providers },
+              })),
+            );
+            const providerUsageStatuses = providerUsageTracker.streamChanges.pipe(
+              Stream.mapEffect(() => loadDecoratedProviders),
               Stream.map((providers) => ({
                 version: 1 as const,
                 type: "providerStatuses" as const,
@@ -729,7 +747,13 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 type: "snapshot" as const,
                 config: yield* loadServerConfig,
               }),
-              Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
+              Stream.merge(
+                keybindingsUpdates,
+                Stream.merge(
+                  Stream.merge(providerStatuses, providerUsageStatuses),
+                  settingsUpdates,
+                ),
+              ),
             );
           }),
           { "rpc.aggregate": "server" },
