@@ -179,6 +179,24 @@ function createCodexUsageLimits() {
   } as const;
 }
 
+function createClaudeUsageLimits() {
+  return {
+    updatedAt: NOW_ISO,
+    windows: [
+      {
+        label: "5h",
+        durationMinutes: 300,
+        usedPercent: 41,
+      },
+      {
+        label: "7d",
+        durationMinutes: 10_080,
+        usedPercent: 17,
+      },
+    ],
+  } as const;
+}
+
 function appendContextWindowActivity(snapshot: OrchestrationReadModel): OrchestrationReadModel {
   return {
     ...snapshot,
@@ -3283,6 +3301,65 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("renders Claude usage pills when Claude exposes canonical windows", async () => {
+    const claudeUsageSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-claude-usage" as MessageId,
+      targetText: "claude usage",
+    });
+    const claudeUsageThreads = [...claudeUsageSnapshot.threads];
+    const firstClaudeUsageThread = claudeUsageThreads[0];
+    if (firstClaudeUsageThread) {
+      claudeUsageThreads[0] = {
+        ...firstClaudeUsageThread,
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-20250514",
+        },
+      };
+    }
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...claudeUsageSnapshot,
+        threads: claudeUsageThreads,
+      },
+      configureFixture: (nextFixture) => {
+        const codexProvider = nextFixture.serverConfig.providers[0];
+        if (!codexProvider) {
+          throw new Error("Expected a default Codex provider in the fixture.");
+        }
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            codexProvider,
+            {
+              provider: "claudeAgent",
+              enabled: true,
+              installed: true,
+              version: "1.0.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: NOW_ISO,
+              models: [],
+              usageLimits: createClaudeUsageLimits(),
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await vi.waitFor(() => {
+        const usageWidget = document.querySelector('[data-testid="usage-limits-widget"]');
+        expect(usageWidget?.textContent).toContain("5h");
+        expect(usageWidget?.textContent).toContain("7d");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("hides the usage widget when the selected provider has no supported limits", async () => {
     const hiddenUsageSnapshot = createSnapshotForTargetUser({
       targetMessageId: "msg-user-usage-hidden" as MessageId,
@@ -3327,6 +3404,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
               auth: { status: "authenticated" },
               checkedAt: NOW_ISO,
               models: [],
+              usageLimits: {
+                updatedAt: NOW_ISO,
+                windows: [
+                  {
+                    label: "weekly",
+                    durationMinutes: 10_080,
+                    usedPercent: 17,
+                  },
+                ],
+              },
             },
           ],
         };

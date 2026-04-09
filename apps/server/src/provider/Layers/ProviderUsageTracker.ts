@@ -1,7 +1,13 @@
-import type { ProviderRuntimeEvent, ServerProvider } from "@t3tools/contracts";
+import type {
+  ProviderRuntimeEvent,
+  ServerProvider,
+  ServerProviderUsageLimits,
+} from "@t3tools/contracts";
 import { Effect, Layer, PubSub, Ref, Stream } from "effect";
 
+import { normalizeClaudeRateLimits } from "../claudeRateLimits.ts";
 import { normalizeCodexRateLimits } from "../codexRateLimits.ts";
+import { orderCanonicalUsageWindows } from "../rateLimitUtils.ts";
 import {
   ProviderUsageTracker,
   type ProviderUsageSnapshot,
@@ -38,6 +44,29 @@ function withoutUsageLimits(provider: ServerProvider): ServerProvider {
   return baseProvider;
 }
 
+function mergeUsageLimits(
+  previous: ServerProviderUsageLimits | undefined,
+  next: ServerProviderUsageLimits,
+): ServerProviderUsageLimits {
+  if (!previous) {
+    return next;
+  }
+
+  const windowsByLabel = new Map(previous.windows.map((window) => [window.label, window] as const));
+  for (const window of next.windows) {
+    windowsByLabel.set(window.label, window);
+  }
+
+  return {
+    updatedAt: next.updatedAt,
+    ...((next.limitId ?? previous.limitId) ? { limitId: next.limitId ?? previous.limitId } : {}),
+    ...((next.limitName ?? previous.limitName)
+      ? { limitName: next.limitName ?? previous.limitName }
+      : {}),
+    windows: orderCanonicalUsageWindows([...windowsByLabel.values()]),
+  };
+}
+
 export const ProviderUsageTrackerLive = Layer.effect(
   ProviderUsageTracker,
   Effect.gen(function* () {
@@ -54,19 +83,25 @@ export const ProviderUsageTrackerLive = Layer.effect(
       if (event.type !== "account.rate-limits.updated") {
         return;
       }
-      if (event.provider !== "codex") {
-        return;
-      }
 
-      const usageLimits = normalizeCodexRateLimits(event.payload, event.createdAt);
+      const usageLimits =
+        event.provider === "codex"
+          ? normalizeCodexRateLimits(event.payload, event.createdAt)
+          : event.provider === "claudeAgent"
+            ? normalizeClaudeRateLimits(event.payload, event.createdAt)
+            : null;
       if (!usageLimits) {
         return;
       }
 
       const previousSnapshot = yield* Ref.get(snapshotRef);
+      const nextProviderUsageLimits =
+        event.provider === "claudeAgent"
+          ? mergeUsageLimits(previousSnapshot[event.provider], usageLimits)
+          : usageLimits;
       const nextSnapshot: ProviderUsageSnapshot = {
         ...previousSnapshot,
-        [event.provider]: usageLimits,
+        [event.provider]: nextProviderUsageLimits,
       };
       if (!haveSnapshotsChanged(previousSnapshot, nextSnapshot)) {
         return;

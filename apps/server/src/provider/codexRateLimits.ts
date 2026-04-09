@@ -1,27 +1,16 @@
 import type { ServerProviderUsageLimitWindow, ServerProviderUsageLimits } from "@t3tools/contracts";
 
+import {
+  asNumber,
+  asObject,
+  asString,
+  clampUsedPercent,
+  orderCanonicalUsageWindows,
+} from "./rateLimitUtils.ts";
+
 type CanonicalUsageWindow = ServerProviderUsageLimitWindow & {
   label: "5h" | "7d";
 };
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
 function looksLikeRateLimitSnapshot(value: unknown): value is Record<string, unknown> {
   const record = asObject(value);
@@ -57,14 +46,14 @@ function normalizeWindow(input: {
     return {
       label: "5h",
       durationMinutes,
-      usedPercent: Math.max(0, Math.min(100, usedPercent)),
+      usedPercent: clampUsedPercent(usedPercent),
     };
   }
   if (durationMinutes === 10_080) {
     return {
       label: "7d",
       durationMinutes,
-      usedPercent: Math.max(0, Math.min(100, usedPercent)),
+      usedPercent: clampUsedPercent(usedPercent),
     };
   }
   if (durationMinutes !== undefined) {
@@ -74,7 +63,7 @@ function normalizeWindow(input: {
   return {
     label: input.fallbackLabel,
     durationMinutes: input.fallbackLabel === "5h" ? 300 : 10_080,
-    usedPercent: Math.max(0, Math.min(100, usedPercent)),
+    usedPercent: clampUsedPercent(usedPercent),
   };
 }
 
@@ -140,10 +129,12 @@ export function normalizeCodexRateLimits(
     windowsByLabel.set(window.label, window);
   }
 
-  const windows: ServerProviderUsageLimitWindow[] = (["5h", "7d"] as const).flatMap((label) => {
-    const window = windowsByLabel.get(label);
-    return window ? [window] : [];
-  });
+  const windows: ServerProviderUsageLimitWindow[] = orderCanonicalUsageWindows(
+    (["5h", "7d"] as const).flatMap((label) => {
+      const window = windowsByLabel.get(label);
+      return window ? [window] : [];
+    }),
+  );
   if (windows.length === 0) {
     return null;
   }

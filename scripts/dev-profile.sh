@@ -10,6 +10,25 @@ t3code_dev_profile_path() {
   printf '%s\n' "${T3CODE_DEV_PROFILE_PATH:-$state_home/nix/profiles/t3code-dev-shell}"
 }
 
+t3code_is_wayland_session() {
+  [[ "$(uname -s)" == "Linux" ]] || return 1
+
+  if [[ "${XDG_SESSION_TYPE:-}" =~ ^[Ww][Aa][Yy][Ll][Aa][Nn][Dd]$ ]]; then
+    return 0
+  fi
+
+  [[ -n "${WAYLAND_DISPLAY:-}" ]]
+}
+
+t3code_default_dev_mode() {
+  if t3code_is_wayland_session; then
+    printf '%s\n' "dev:desktop"
+    return
+  fi
+
+  printf '%s\n' "dev"
+}
+
 t3code_ensure_dev_profile() {
   local root_dir profile_path
   root_dir="${1:-$(t3code_root_dir)}"
