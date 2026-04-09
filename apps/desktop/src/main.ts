@@ -30,6 +30,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { resolveDesktopBackendBootstrapConfig } from "./desktopBootstrapConfig";
 import { resolveLinuxWaylandEnvironment } from "./linuxDisplay";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
@@ -114,6 +115,7 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 });
 const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+const desktopBackendBootstrap = resolveDesktopBackendBootstrapConfig();
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -167,7 +169,11 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   delete env.T3CODE_MODE;
   delete env.T3CODE_NO_BROWSER;
   delete env.T3CODE_HOST;
+  delete env.T3CODE_CWD;
+  delete env.T3CODE_DESKTOP_CWD;
   delete env.T3CODE_DESKTOP_WS_URL;
+  delete env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
+  delete env.T3CODE_DESKTOP_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
   return env;
 }
 
@@ -1074,6 +1080,13 @@ function startBackend(): void {
         port: backendPort,
         t3Home: BASE_DIR,
         authToken: backendAuthToken,
+        ...(desktopBackendBootstrap.cwd ? { cwd: desktopBackendBootstrap.cwd } : {}),
+        ...(desktopBackendBootstrap.autoBootstrapProjectFromCwd !== undefined
+          ? {
+              autoBootstrapProjectFromCwd:
+                desktopBackendBootstrap.autoBootstrapProjectFromCwd,
+            }
+          : {}),
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
           : {}),
@@ -1097,7 +1110,9 @@ function startBackend(): void {
   };
   writeBackendSessionBoundary(
     "START",
-    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()} projectCwd=${
+      desktopBackendBootstrap.cwd ?? resolveBackendCwd()
+    }`,
   );
   captureBackendOutput(child);
 

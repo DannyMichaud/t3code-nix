@@ -23,6 +23,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   port: Schema.optional(PortSchema),
   host: Schema.optional(Schema.String),
   t3Home: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.String),
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   authToken: Schema.optional(Schema.String),
@@ -112,6 +113,7 @@ const EnvServerConfig = Config.all({
   port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
   t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  cwd: Config.string("T3CODE_CWD").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
@@ -226,7 +228,14 @@ export const resolveServerConfig = (
         ),
       ),
     );
-    const rawCwd = Option.getOrElse(flags.cwd, () => process.cwd());
+    const rawCwd = Option.getOrElse(
+      resolveOptionPrecedence(
+        flags.cwd,
+        Option.fromUndefinedOr(env.cwd),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.cwd)),
+      ),
+      () => process.cwd(),
+    );
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);

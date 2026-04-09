@@ -59,7 +59,7 @@ export type ServerProviderModel = typeof ServerProviderModel.Type;
 export const ServerProviderUsageLimitWindow = Schema.Struct({
   label: TrimmedNonEmptyString,
   durationMinutes: Schema.Number,
-  usedPercent: Schema.Number,
+  usedPercent: Schema.optional(Schema.Number),
 });
 export type ServerProviderUsageLimitWindow = typeof ServerProviderUsageLimitWindow.Type;
 

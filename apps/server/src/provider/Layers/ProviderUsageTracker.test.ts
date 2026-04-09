@@ -273,6 +273,37 @@ describe("ProviderUsageTracker", () => {
     );
   });
 
+  it("keeps Claude windows when utilization is unavailable", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* buildTrackerHarness();
+
+          yield* harness.publish(
+            makeRuntimeEvent({
+              provider: "claudeAgent",
+              payload: makeClaudeRateLimitPayload({
+                rateLimitType: "five_hour",
+              }),
+            }),
+          );
+          yield* Effect.sleep(Duration.millis(1));
+
+          const snapshot = yield* harness.tracker.getSnapshot;
+          assert.deepStrictEqual(snapshot.claudeAgent, {
+            updatedAt: "2026-04-08T00:00:00.000Z",
+            windows: [
+              {
+                label: "5h",
+                durationMinutes: 300,
+              },
+            ],
+          });
+        }),
+      ),
+    );
+  });
+
   it("ignores unsupported Claude rate-limit variants", async () => {
     await Effect.runPromise(
       Effect.scoped(

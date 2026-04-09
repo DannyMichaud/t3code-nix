@@ -3,8 +3,17 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { getCanonicalProviderUsageWindows } from "~/lib/providerUsage";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
-function formatUsedPercent(value: number): string {
+function formatUsedPercent(value: number | undefined): string {
+  if (value === undefined) {
+    return "n/a";
+  }
   return `${Math.round(value)}%`;
+}
+
+function describeWindow(window: { label: string; usedPercent?: number | undefined }): string {
+  return window.usedPercent === undefined
+    ? `${window.label} usage unavailable`
+    : `${window.label} ${formatUsedPercent(window.usedPercent)}`;
 }
 
 export function UsageLimitsWidget(props: {
@@ -26,9 +35,7 @@ export function UsageLimitsWidget(props: {
             type="button"
             data-testid="usage-limits-widget"
             className="inline-flex items-center gap-1"
-            aria-label={`Usage limits ${windows
-              .map((window) => `${window.label} ${formatUsedPercent(window.usedPercent)}`)
-              .join(", ")}`}
+            aria-label={`Usage limits ${windows.map(describeWindow).join(", ")}`}
           >
             {windows.map((window) => (
               <span
@@ -40,7 +47,7 @@ export function UsageLimitsWidget(props: {
                   aria-hidden="true"
                   className="absolute inset-y-0 left-0 bg-muted-foreground/14"
                   style={{
-                    width: `${Math.max(0, Math.min(100, window.usedPercent))}%`,
+                    width: `${Math.max(0, Math.min(100, window.usedPercent ?? 0))}%`,
                   }}
                 />
                 <span className="relative flex w-full items-center justify-between gap-1.5">
@@ -63,7 +70,11 @@ export function UsageLimitsWidget(props: {
               className="flex items-center justify-between gap-4 whitespace-nowrap text-xs text-foreground"
             >
               <span>{window.label} rolling window</span>
-              <span className="font-medium">{formatUsedPercent(window.usedPercent)} used</span>
+              <span className="font-medium">
+                {window.usedPercent === undefined
+                  ? "Usage unavailable"
+                  : `${formatUsedPercent(window.usedPercent)} used`}
+              </span>
             </div>
           ))}
         </div>

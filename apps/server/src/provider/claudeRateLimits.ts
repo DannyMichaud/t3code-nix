@@ -94,9 +94,6 @@ export function normalizeClaudeRateLimits(
   }
 
   const utilization = asNumber(rateLimitInfo.utilization);
-  if (utilization === undefined) {
-    return null;
-  }
 
   return {
     updatedAt,
@@ -104,7 +101,11 @@ export function normalizeClaudeRateLimits(
       {
         label,
         durationMinutes: normalizeRateLimitDurationMinutes(label),
-        usedPercent: clampUsedPercent(Math.floor(utilization * 100)),
+        ...(utilization !== undefined
+          ? {
+              usedPercent: clampUsedPercent(Math.floor(utilization * 100)),
+            }
+          : {}),
       },
     ]),
   };

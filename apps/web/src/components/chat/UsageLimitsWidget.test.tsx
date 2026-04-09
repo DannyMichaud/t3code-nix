@@ -53,6 +53,26 @@ describe("UsageLimitsWidget", () => {
     expect(markup).toContain("usage-limit-pill-7d");
   });
 
+  it("renders canonical pills even when a provider omits the usage percent", () => {
+    const markup = renderToStaticMarkup(
+      <UsageLimitsWidget
+        usageLimits={{
+          updatedAt: "2026-04-08T00:00:00.000Z",
+          windows: [
+            {
+              label: "5h",
+              durationMinutes: 300,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(markup).toContain("usage-limit-pill-5h");
+    expect(markup).toContain("n/a");
+    expect(markup).toContain("usage unavailable");
+  });
+
   it("hides the widget when no supported windows exist", () => {
     expect(
       renderToStaticMarkup(
