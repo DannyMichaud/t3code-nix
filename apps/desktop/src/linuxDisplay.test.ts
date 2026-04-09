@@ -115,6 +115,31 @@ describe("resolveLinuxWaylandEnvironment", () => {
     });
   });
 
+  it("deduplicates duplicate Hyprland lockfiles that point at the same socket", async () => {
+    const runtimeDir = await makeRuntimeDir();
+    const firstHyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-a");
+    const secondHyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-b");
+    await FS.mkdir(firstHyprRuntimeDir, { recursive: true });
+    await FS.mkdir(secondHyprRuntimeDir, { recursive: true });
+    await FS.writeFile(Path.join(firstHyprRuntimeDir, "hyprland.lock"), "2554\nwayland-1\n");
+    await FS.writeFile(Path.join(secondHyprRuntimeDir, "hyprland.lock"), "859777\nwayland-1\n");
+
+    await createWaylandSocket(Path.join(runtimeDir, "wayland-1"));
+
+    expect(
+      resolveLinuxWaylandEnvironment(
+        {
+          XDG_RUNTIME_DIR: runtimeDir,
+        },
+        { platform: "linux" },
+      ),
+    ).toEqual({
+      WAYLAND_DISPLAY: "wayland-1",
+      XDG_RUNTIME_DIR: runtimeDir,
+      XDG_SESSION_TYPE: "wayland",
+    });
+  });
+
   it("uses the single available wayland socket when the session is wayland", async () => {
     const runtimeDir = await makeRuntimeDir();
     await createWaylandSocket(Path.join(runtimeDir, "wayland-2"));

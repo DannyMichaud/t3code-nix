@@ -78,12 +78,18 @@ function resolveHyprlandWaylandDisplay(
     return undefined;
   }
 
-  const candidates = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => parseHyprlandLockFile(Path.join(hyprRuntimeDir, entry.name, "hyprland.lock")))
-    .filter((socketName): socketName is string =>
-      Boolean(socketName && isValidWaylandDisplay(runtimeDir, socketName)),
-    );
+  const candidates = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) =>
+          parseHyprlandLockFile(Path.join(hyprRuntimeDir, entry.name, "hyprland.lock")),
+        )
+        .filter((socketName): socketName is string =>
+          Boolean(socketName && isValidWaylandDisplay(runtimeDir, socketName)),
+        ),
+    ),
+  );
 
   if (candidates.length !== 1) {
     return undefined;

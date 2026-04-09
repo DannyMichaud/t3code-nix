@@ -1083,8 +1083,7 @@ function startBackend(): void {
         ...(desktopBackendBootstrap.cwd ? { cwd: desktopBackendBootstrap.cwd } : {}),
         ...(desktopBackendBootstrap.autoBootstrapProjectFromCwd !== undefined
           ? {
-              autoBootstrapProjectFromCwd:
-                desktopBackendBootstrap.autoBootstrapProjectFromCwd,
+              autoBootstrapProjectFromCwd: desktopBackendBootstrap.autoBootstrapProjectFromCwd,
             }
           : {}),
         ...(backendObservabilitySettings.otlpTracesUrl
