@@ -30,6 +30,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { resolveLinuxWaylandEnvironment } from "./linuxDisplay";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -65,6 +66,7 @@ const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const shouldOpenDevTools = process.env.T3CODE_OPEN_DEVTOOLS === "1";
 const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
 const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
@@ -123,6 +125,24 @@ function logScope(scope: string): string {
 
 function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function hasCommandLineSwitch(switchName: string): boolean {
+  const prefix = `--${switchName}`;
+  return process.argv.some((arg) => arg === prefix || arg.startsWith(`${prefix}=`));
+}
+
+function appendCommandLineSwitchIfMissing(switchName: string, value?: string): void {
+  if (hasCommandLineSwitch(switchName)) {
+    return;
+  }
+
+  if (value === undefined) {
+    app.commandLine.appendSwitch(switchName);
+    return;
+  }
+
+  app.commandLine.appendSwitch(switchName, value);
 }
 
 function readPersistedBackendObservabilitySettings(): {
@@ -287,9 +307,27 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
 
 initializePackagedLogging();
 
+const linuxWaylandEnvironment = resolveLinuxWaylandEnvironment(process.env);
+if (linuxWaylandEnvironment) {
+  Object.assign(process.env, linuxWaylandEnvironment);
+}
+
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
+  app.commandLine.appendSwitch("high-dpi-support", "1");
+  const deviceScaleFactor = process.env.T3CODE_DEVICE_SCALE_FACTOR?.trim();
+  if (deviceScaleFactor && /^\d+(\.\d+)?$/.test(deviceScaleFactor)) {
+    app.commandLine.appendSwitch("force-device-scale-factor", deviceScaleFactor);
+  }
+
+  if (linuxWaylandEnvironment) {
+    appendCommandLineSwitchIfMissing("ozone-platform", "wayland");
+    appendCommandLineSwitchIfMissing("enable-wayland-ime");
+  }
 }
+
+nativeTheme.themeSource =
+  getSafeTheme(process.env.T3CODE_THEME_SOURCE?.trim()) ?? (isDevelopment ? "dark" : "system");
 
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
   if (process.platform !== "darwin") return undefined;
@@ -1407,7 +1445,9 @@ function createWindow(): BrowserWindow {
 
   if (isDevelopment) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    if (shouldOpenDevTools) {
+      window.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }

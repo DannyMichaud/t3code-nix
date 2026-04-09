@@ -16,6 +16,8 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveLinuxWaylandEnvironment } from "../src/linuxDisplay.ts";
+
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_BUNDLE_ID = "com.t3tools.t3code";
@@ -23,6 +25,17 @@ const LAUNCHER_VERSION = 1;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
+
+export function getElectronDisplayArgs(env = process.env) {
+  const waylandEnvironment = resolveLinuxWaylandEnvironment(env);
+  if (!waylandEnvironment) {
+    return [];
+  }
+
+  Object.assign(env, waylandEnvironment);
+
+  return ["--ozone-platform=wayland", "--enable-wayland-ime"];
+}
 
 function setPlistString(plistPath, key, value) {
   const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {

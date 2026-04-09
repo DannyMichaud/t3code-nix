@@ -109,7 +109,12 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
     return {};
   }
 
-  const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(names)], {
+  const shellArgs =
+    process.platform === "linux"
+      ? ["-lc", buildEnvironmentCaptureCommand(names)]
+      : ["-ilc", buildEnvironmentCaptureCommand(names)];
+
+  const output = execFile(shell, shellArgs, {
     encoding: "utf8",
     timeout: 5000,
   });

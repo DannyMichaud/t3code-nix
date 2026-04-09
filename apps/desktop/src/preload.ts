@@ -13,6 +13,15 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const rawForcedTheme = process.env.T3CODE_FORCE_THEME;
+const forcedTheme =
+  rawForcedTheme === "light" || rawForcedTheme === "dark" || rawForcedTheme === "system"
+    ? rawForcedTheme
+    : null;
+
+contextBridge.exposeInMainWorld("desktopRuntime", {
+  forcedTheme,
+});
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {

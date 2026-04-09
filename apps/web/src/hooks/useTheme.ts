@@ -20,10 +20,23 @@ function getSystemDark(): boolean {
   return window.matchMedia(MEDIA_QUERY).matches;
 }
 
+function getForcedDesktopTheme(): Theme | null {
+  const forcedTheme = window.desktopRuntime?.forcedTheme;
+  if (forcedTheme === "light" || forcedTheme === "dark" || forcedTheme === "system") {
+    return forcedTheme;
+  }
+  return null;
+}
+
 function getStored(): Theme {
+  const forcedTheme = getForcedDesktopTheme();
+  if (forcedTheme) {
+    return forcedTheme;
+  }
+
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
-  return "system";
+  return window.desktopBridge ? "dark" : "system";
 }
 
 function applyTheme(theme: Theme, suppressTransitions = false) {
@@ -107,7 +120,9 @@ export function useTheme() {
     theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
 
   const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next);
+    if (!getForcedDesktopTheme()) {
+      localStorage.setItem(STORAGE_KEY, next);
+    }
     applyTheme(next, true);
     emitChange();
   }, []);

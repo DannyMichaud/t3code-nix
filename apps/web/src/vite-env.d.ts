@@ -14,5 +14,8 @@ declare global {
   interface Window {
     nativeApi?: NativeApi;
     desktopBridge?: DesktopBridge;
+    desktopRuntime?: {
+      forcedTheme?: "light" | "dark" | "system" | null;
+    };
   }
 }

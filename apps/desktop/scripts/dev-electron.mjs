@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { watch } from "node:fs";
 import { join } from "node:path";
 
-import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
+import { desktopDir, getElectronDisplayArgs, resolveElectronPath } from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
 const port = Number(process.env.ELECTRON_RENDERER_PORT ?? 5733);
@@ -57,18 +57,20 @@ function startApp() {
     return;
   }
 
-  const app = spawn(
-    resolveElectronPath(),
-    [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
-    {
-      cwd: desktopDir,
-      env: {
-        ...childEnv,
-        VITE_DEV_SERVER_URL: devServerUrl,
-      },
-      stdio: "inherit",
+  const electronArgs = [
+    ...getElectronDisplayArgs(childEnv),
+    `--t3code-dev-root=${desktopDir}`,
+    "dist-electron/main.js",
+  ];
+
+  const app = spawn(resolveElectronPath(), electronArgs, {
+    cwd: desktopDir,
+    env: {
+      ...childEnv,
+      VITE_DEV_SERVER_URL: devServerUrl,
     },
-  );
+    stdio: "inherit",
+  });
 
   currentApp = app;
 
