@@ -1,5 +1,6 @@
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
+import { resolveLinuxWaylandEnvironment } from "@t3tools/shared/linuxDisplay";
 import {
   type ShellEnvironmentReader,
   syncShellEnvironmentFromLoginShell,
@@ -17,6 +18,12 @@ export function fixPath(
     ...(options.platform !== undefined ? { platform: options.platform } : {}),
     ...(options.readEnvironment !== undefined ? { readEnvironment: options.readEnvironment } : {}),
   });
+  const linuxWaylandOptions =
+    options.platform === undefined ? undefined : { platform: options.platform };
+  const linuxWaylandEnvironment = resolveLinuxWaylandEnvironment(env, linuxWaylandOptions);
+  if (linuxWaylandEnvironment) {
+    Object.assign(env, linuxWaylandEnvironment);
+  }
 }
 
 export const expandHomePath = Effect.fn(function* (input: string) {

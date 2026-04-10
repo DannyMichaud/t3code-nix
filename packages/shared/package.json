@@ -16,6 +16,10 @@
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
     },
+    "./linuxDisplay": {
+      "types": "./src/linuxDisplay.ts",
+      "import": "./src/linuxDisplay.ts"
+    },
     "./shell": {
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"

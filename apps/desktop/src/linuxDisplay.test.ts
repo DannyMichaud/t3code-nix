@@ -10,7 +10,7 @@ import { resolveLinuxWaylandEnvironment } from "./linuxDisplay";
 const runtimeDirs = new Set<string>();
 const socketServers = new Set<Net.Server>();
 
-async function createWaylandSocket(socketPath: string): Promise<void> {
+async function createUnixSocket(socketPath: string): Promise<void> {
   await FS.mkdir(Path.dirname(socketPath), { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
@@ -53,7 +53,7 @@ describe("resolveLinuxWaylandEnvironment", () => {
   it("keeps an inherited wayland socket when it is still valid", async () => {
     const runtimeDir = await makeRuntimeDir();
     const socketPath = Path.join(runtimeDir, "wayland-4");
-    await createWaylandSocket(socketPath);
+    await createUnixSocket(socketPath);
 
     expect(
       resolveLinuxWaylandEnvironment(
@@ -75,8 +75,9 @@ describe("resolveLinuxWaylandEnvironment", () => {
     const hyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-a");
     await FS.mkdir(hyprRuntimeDir, { recursive: true });
     await FS.writeFile(Path.join(hyprRuntimeDir, "hyprland.lock"), "2554\nwayland-1\n");
+    await createUnixSocket(Path.join(hyprRuntimeDir, ".socket.sock"));
 
-    await createWaylandSocket(Path.join(runtimeDir, "wayland-1"));
+    await createUnixSocket(Path.join(runtimeDir, "wayland-1"));
 
     expect(
       resolveLinuxWaylandEnvironment(
@@ -87,6 +88,7 @@ describe("resolveLinuxWaylandEnvironment", () => {
         { platform: "linux" },
       ),
     ).toEqual({
+      HYPRLAND_INSTANCE_SIGNATURE: "instance-a",
       WAYLAND_DISPLAY: "wayland-1",
       XDG_RUNTIME_DIR: runtimeDir,
       XDG_SESSION_TYPE: "wayland",
@@ -98,8 +100,9 @@ describe("resolveLinuxWaylandEnvironment", () => {
     const hyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-a");
     await FS.mkdir(hyprRuntimeDir, { recursive: true });
     await FS.writeFile(Path.join(hyprRuntimeDir, "hyprland.lock"), "2554\nwayland-8\n");
+    await createUnixSocket(Path.join(hyprRuntimeDir, ".socket.sock"));
 
-    await createWaylandSocket(Path.join(runtimeDir, "wayland-8"));
+    await createUnixSocket(Path.join(runtimeDir, "wayland-8"));
 
     expect(
       resolveLinuxWaylandEnvironment(
@@ -109,7 +112,38 @@ describe("resolveLinuxWaylandEnvironment", () => {
         { platform: "linux" },
       ),
     ).toEqual({
+      HYPRLAND_INSTANCE_SIGNATURE: "instance-a",
       WAYLAND_DISPLAY: "wayland-8",
+      XDG_RUNTIME_DIR: runtimeDir,
+      XDG_SESSION_TYPE: "wayland",
+    });
+  });
+
+  it("recovers the matching Hyprland instance signature from an inherited wayland display", async () => {
+    const runtimeDir = await makeRuntimeDir();
+    const firstHyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-a");
+    const secondHyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-b");
+    await FS.mkdir(firstHyprRuntimeDir, { recursive: true });
+    await FS.mkdir(secondHyprRuntimeDir, { recursive: true });
+    await FS.writeFile(Path.join(firstHyprRuntimeDir, "hyprland.lock"), "2554\nwayland-1\n");
+    await FS.writeFile(Path.join(secondHyprRuntimeDir, "hyprland.lock"), "2555\nwayland-2\n");
+    await createUnixSocket(Path.join(firstHyprRuntimeDir, ".socket.sock"));
+    await createUnixSocket(Path.join(secondHyprRuntimeDir, ".socket.sock"));
+
+    await createUnixSocket(Path.join(runtimeDir, "wayland-1"));
+    await createUnixSocket(Path.join(runtimeDir, "wayland-2"));
+
+    expect(
+      resolveLinuxWaylandEnvironment(
+        {
+          WAYLAND_DISPLAY: "wayland-2",
+          XDG_RUNTIME_DIR: runtimeDir,
+        },
+        { platform: "linux" },
+      ),
+    ).toEqual({
+      HYPRLAND_INSTANCE_SIGNATURE: "instance-b",
+      WAYLAND_DISPLAY: "wayland-2",
       XDG_RUNTIME_DIR: runtimeDir,
       XDG_SESSION_TYPE: "wayland",
     });
@@ -124,7 +158,7 @@ describe("resolveLinuxWaylandEnvironment", () => {
     await FS.writeFile(Path.join(firstHyprRuntimeDir, "hyprland.lock"), "2554\nwayland-1\n");
     await FS.writeFile(Path.join(secondHyprRuntimeDir, "hyprland.lock"), "859777\nwayland-1\n");
 
-    await createWaylandSocket(Path.join(runtimeDir, "wayland-1"));
+    await createUnixSocket(Path.join(runtimeDir, "wayland-1"));
 
     expect(
       resolveLinuxWaylandEnvironment(
@@ -142,7 +176,7 @@ describe("resolveLinuxWaylandEnvironment", () => {
 
   it("uses the single available wayland socket when the session is wayland", async () => {
     const runtimeDir = await makeRuntimeDir();
-    await createWaylandSocket(Path.join(runtimeDir, "wayland-2"));
+    await createUnixSocket(Path.join(runtimeDir, "wayland-2"));
 
     expect(
       resolveLinuxWaylandEnvironment(
