@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -844,6 +845,37 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
             .slice(1)
             .some((input) => input.shell !== "/definitely/missing-shell"),
         ).toBe(true);
+      }
+    }),
+  );
+
+  it.effect("prefers the account login shell over an inherited sh wrapper shell", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return;
+
+      const loginShell = os.userInfo().shell;
+      if (!loginShell) return;
+
+      const loginShellName = path.basename(loginShell).toLowerCase();
+      if (loginShellName === "sh") return;
+
+      const previousShell = process.env.SHELL;
+      process.env.SHELL = "/bin/sh";
+
+      try {
+        const { manager, ptyAdapter } = yield* createManager();
+        yield* manager.open(openInput());
+        const spawnInput = ptyAdapter.spawnInputs[0];
+        expect(spawnInput).toBeDefined();
+        if (!spawnInput) return;
+
+        expect(path.basename(spawnInput.shell).toLowerCase()).toBe(loginShellName);
+      } finally {
+        if (previousShell === undefined) {
+          delete process.env.SHELL;
+        } else {
+          process.env.SHELL = previousShell;
+        }
       }
     }),
   );

@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -219,6 +220,16 @@ function defaultShellResolver(): string {
   if (process.platform === "win32") {
     return process.env.ComSpec ?? "cmd.exe";
   }
+
+  try {
+    const loginShell = os.userInfo().shell?.trim();
+    if (loginShell && loginShell.length > 0) {
+      return loginShell;
+    }
+  } catch {
+    // Fall back to inherited process env below.
+  }
+
   return process.env.SHELL ?? "bash";
 }
 
