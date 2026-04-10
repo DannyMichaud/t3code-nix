@@ -100,6 +100,11 @@ export type ShellEnvironmentReader = (
   execFile?: ExecFileSyncLike,
 ) => Partial<Record<string, string>>;
 
+export interface SyncShellEnvironmentOptions {
+  platform?: NodeJS.Platform;
+  readEnvironment?: ShellEnvironmentReader;
+}
+
 export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
   shell,
   names,
@@ -129,3 +134,36 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
 
   return environment;
 };
+
+export function syncShellEnvironmentFromLoginShell(
+  env: NodeJS.ProcessEnv = process.env,
+  options: SyncShellEnvironmentOptions = {},
+): void {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "darwin" && platform !== "linux") return;
+
+  try {
+    const shell = resolveLoginShell(platform, env.SHELL);
+    if (!shell) return;
+
+    const shellEnvironment = (options.readEnvironment ?? readEnvironmentFromLoginShell)(shell, [
+      "PATH",
+      "SHELL",
+      "SSH_AUTH_SOCK",
+    ]);
+
+    if (shellEnvironment.PATH) {
+      env.PATH = shellEnvironment.PATH;
+    }
+
+    if (!env.SHELL && shellEnvironment.SHELL) {
+      env.SHELL = shellEnvironment.SHELL;
+    }
+
+    if (!env.SSH_AUTH_SOCK && shellEnvironment.SSH_AUTH_SOCK) {
+      env.SSH_AUTH_SOCK = shellEnvironment.SSH_AUTH_SOCK;
+    }
+  } catch {
+    // Keep inherited environment if shell lookup fails.
+  }
+}

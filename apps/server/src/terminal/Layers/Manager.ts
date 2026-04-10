@@ -52,7 +52,42 @@ const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
-const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
+const POSIX_TERMINAL_TYPE = "xterm-256color";
+const WINDOWS_TERMINAL_TYPE = "xterm-color";
+const TERMINAL_ENV_BLOCKLIST = new Set([
+  "PORT",
+  "ELECTRON_RENDERER_PORT",
+  "ELECTRON_RUN_AS_NODE",
+  "TERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+  "PROMPT_COMMAND",
+  "PS1",
+  "PS2",
+  "PS4",
+  "BASH_ENV",
+  "ENV",
+  "INSIDE_EMACS",
+  "TMUX",
+  "TMUX_PANE",
+  "STY",
+  "WINDOW",
+  "WINDOWID",
+  "WT_SESSION",
+  "WT_PROFILE_ID",
+  "WT_SPAWNED",
+  "VTE_VERSION",
+  "SHELL_PROMPT_PREFIX",
+  "SHELL_PROMPT_SUFFIX",
+]);
+const TERMINAL_ENV_BLOCKED_PREFIXES = [
+  "KITTY_",
+  "WEZTERM_",
+  "ITERM_",
+  "ALACRITTY_",
+  "GHOSTTY_",
+  "KONSOLE_",
+] as const;
 
 type TerminalSubprocessChecker = (
   terminalPid: number,
@@ -611,6 +646,9 @@ function shouldExcludeTerminalEnvKey(key: string): boolean {
   if (normalizedKey.startsWith("VITE_")) {
     return true;
   }
+  if (TERMINAL_ENV_BLOCKED_PREFIXES.some((prefix) => normalizedKey.startsWith(prefix))) {
+    return true;
+  }
   return TERMINAL_ENV_BLOCKLIST.has(normalizedKey);
 }
 
@@ -628,6 +666,11 @@ function createTerminalSpawnEnv(
     for (const [key, value] of Object.entries(runtimeEnv)) {
       spawnEnv[key] = value;
     }
+  }
+  spawnEnv.TERM = process.platform === "win32" ? WINDOWS_TERMINAL_TYPE : POSIX_TERMINAL_TYPE;
+  spawnEnv.TERM_PROGRAM = "t3code";
+  if (process.platform !== "win32" && !spawnEnv.COLORTERM) {
+    spawnEnv.COLORTERM = "truecolor";
   }
   return spawnEnv;
 }

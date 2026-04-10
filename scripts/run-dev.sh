@@ -7,8 +7,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dev-profile.sh"
 ROOT_DIR="$(t3code_root_dir)"
 DEV_PROFILE_PATH="$(t3code_dev_profile_path)"
 MODE="${T3CODE_DEV_MODE:-}"
+FORWARD_ARGS=()
 
-if [[ $# -gt 0 ]]; then
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --desktop)
       MODE="dev:desktop"
@@ -22,8 +23,28 @@ if [[ $# -gt 0 ]]; then
       MODE="dev:web"
       shift
       ;;
+    --cwd)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --cwd" >&2
+        exit 1
+      fi
+      export T3CODE_DESKTOP_CWD="$2"
+      shift 2
+      ;;
+    --auto-bootstrap-project-from-cwd)
+      export T3CODE_DESKTOP_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=1
+      shift
+      ;;
+    --no-auto-bootstrap-project-from-cwd)
+      export T3CODE_DESKTOP_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=0
+      shift
+      ;;
+    *)
+      FORWARD_ARGS+=("$1")
+      shift
+      ;;
   esac
-fi
+done
 
 if [[ -z "${T3CODE_DEV_RUN_INNER:-}" ]]; then
   t3code_ensure_dev_profile "$ROOT_DIR" "$DEV_PROFILE_PATH"
@@ -31,7 +52,7 @@ if [[ -z "${T3CODE_DEV_RUN_INNER:-}" ]]; then
   if [[ -n "$MODE" ]]; then
     export T3CODE_DEV_MODE="$MODE"
   fi
-  exec nix develop "$DEV_PROFILE_PATH" --command bash "$ROOT_DIR/scripts/run-dev.sh" "$@"
+  exec nix develop "$DEV_PROFILE_PATH" --command bash "$ROOT_DIR/scripts/run-dev.sh" "${FORWARD_ARGS[@]}"
 fi
 
 cd "$ROOT_DIR"
@@ -47,4 +68,4 @@ if [[ "$MODE" == "dev:desktop" ]]; then
 fi
 
 echo "Launching t3code via bun run ${MODE} (persisted dev shell)"
-exec bun run "$MODE" "$@"
+exec bun run "$MODE" -- "${FORWARD_ARGS[@]}"

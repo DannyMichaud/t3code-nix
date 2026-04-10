@@ -1,29 +1,22 @@
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
-import { readPathFromLoginShell, resolveLoginShell } from "@t3tools/shared/shell";
+import {
+  type ShellEnvironmentReader,
+  syncShellEnvironmentFromLoginShell,
+} from "@t3tools/shared/shell";
 
 export function fixPath(
   options: {
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
-    readPath?: typeof readPathFromLoginShell;
+    readEnvironment?: ShellEnvironmentReader;
   } = {},
 ): void {
-  const platform = options.platform ?? process.platform;
-  if (platform !== "darwin" && platform !== "linux") return;
-
   const env = options.env ?? process.env;
-
-  try {
-    const shell = resolveLoginShell(platform, env.SHELL);
-    if (!shell) return;
-    const result = (options.readPath ?? readPathFromLoginShell)(shell);
-    if (result) {
-      env.PATH = result;
-    }
-  } catch {
-    // Silently ignore — keep default PATH
-  }
+  syncShellEnvironmentFromLoginShell(env, {
+    ...(options.platform !== undefined ? { platform: options.platform } : {}),
+    ...(options.readEnvironment !== undefined ? { readEnvironment: options.readEnvironment } : {}),
+  });
 }
 
 export const expandHomePath = Effect.fn(function* (input: string) {

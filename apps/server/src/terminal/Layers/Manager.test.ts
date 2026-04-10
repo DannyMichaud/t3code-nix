@@ -893,6 +893,61 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
+  it.effect("normalizes inherited terminal-emulator env for spawned terminals", () =>
+    Effect.gen(function* () {
+      const originalValues = new Map<string, string | undefined>();
+      const setEnv = (key: string, value: string | undefined) => {
+        if (!originalValues.has(key)) {
+          originalValues.set(key, process.env[key]);
+        }
+        if (value === undefined) {
+          delete process.env[key];
+          return;
+        }
+        process.env[key] = value;
+      };
+      const restoreEnv = () => {
+        for (const [key, value] of originalValues) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+      };
+
+      setEnv("TERM", "xterm-kitty");
+      setEnv("TERM_PROGRAM", "kitty");
+      setEnv("KITTY_INSTALLATION_DIR", "/opt/kitty");
+      setEnv("KITTY_PID", "4242");
+      setEnv("TMUX", "/tmp/tmux-1000/default,123,0");
+      setEnv("WEZTERM_PANE", "9");
+      setEnv("PROMPT_COMMAND", "echo inherited");
+      setEnv("PS1", "broken prompt");
+      delete process.env.COLORTERM;
+
+      try {
+        const { manager, ptyAdapter } = yield* createManager();
+        yield* manager.open(openInput());
+        const spawnInput = ptyAdapter.spawnInputs[0];
+        expect(spawnInput).toBeDefined();
+        if (!spawnInput) return;
+
+        expect(spawnInput.env.TERM).toBe("xterm-256color");
+        expect(spawnInput.env.TERM_PROGRAM).toBe("t3code");
+        expect(spawnInput.env.COLORTERM).toBe("truecolor");
+        expect(spawnInput.env.KITTY_INSTALLATION_DIR).toBeUndefined();
+        expect(spawnInput.env.KITTY_PID).toBeUndefined();
+        expect(spawnInput.env.TMUX).toBeUndefined();
+        expect(spawnInput.env.WEZTERM_PANE).toBeUndefined();
+        expect(spawnInput.env.PROMPT_COMMAND).toBeUndefined();
+        expect(spawnInput.env.PS1).toBeUndefined();
+      } finally {
+        restoreEnv();
+      }
+    }),
+  );
+
   it.effect("injects runtime env overrides into spawned terminals", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
