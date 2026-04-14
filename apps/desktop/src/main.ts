@@ -231,6 +231,31 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   return null;
 }
 
+function resolveExistingDirectoryPath(rawPath: string | undefined): string | undefined {
+  const trimmedPath = rawPath?.trim();
+  if (!trimmedPath) {
+    return undefined;
+  }
+
+  let candidate = Path.resolve(trimmedPath);
+
+  while (true) {
+    try {
+      const stat = FS.statSync(candidate);
+      if (stat.isDirectory()) {
+        return candidate;
+      }
+      candidate = Path.dirname(candidate);
+    } catch {
+      const parent = Path.dirname(candidate);
+      if (parent === candidate) {
+        return undefined;
+      }
+      candidate = parent;
+    }
+  }
+}
+
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
   chunk: unknown,
@@ -1213,7 +1238,10 @@ function registerIpcHandlers(): void {
       options.defaultPath.trim().length > 0
         ? options.defaultPath.trim()
         : undefined;
-    const defaultPath = requestedDefaultPath ?? desktopBackendBootstrap.cwd;
+    const defaultPath =
+      resolveExistingDirectoryPath(requestedDefaultPath) ??
+      resolveExistingDirectoryPath(desktopBackendBootstrap.cwd) ??
+      resolveExistingDirectoryPath(BASE_DIR);
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const result = owner
       ? await dialog.showOpenDialog(owner, {
