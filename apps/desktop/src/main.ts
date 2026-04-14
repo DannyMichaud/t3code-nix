@@ -256,6 +256,21 @@ function resolveExistingDirectoryPath(rawPath: string | undefined): string | und
   }
 }
 
+function resolveSubenvStoragePath(rawCwd: string | undefined): string | undefined {
+  const trimmedCwd = rawCwd?.trim();
+  if (!trimmedCwd) {
+    return undefined;
+  }
+
+  const subenvName = Path.basename(trimmedCwd);
+  if (!subenvName) {
+    return undefined;
+  }
+
+  const dataHome = process.env.XDG_DATA_HOME || Path.join(OS.homedir(), ".local", "share");
+  return Path.join(dataHome, "subenvs", "storage", subenvName);
+}
+
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
   chunk: unknown,
@@ -1240,6 +1255,7 @@ function registerIpcHandlers(): void {
         : undefined;
     const defaultPath =
       resolveExistingDirectoryPath(requestedDefaultPath) ??
+      resolveExistingDirectoryPath(resolveSubenvStoragePath(desktopBackendBootstrap.cwd)) ??
       resolveExistingDirectoryPath(desktopBackendBootstrap.cwd) ??
       resolveExistingDirectoryPath(STATE_DIR) ??
       resolveExistingDirectoryPath(BASE_DIR);
