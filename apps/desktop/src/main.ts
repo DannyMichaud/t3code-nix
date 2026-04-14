@@ -116,6 +116,14 @@ const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
 const desktopBackendBootstrap = resolveDesktopBackendBootstrapConfig();
 
+if (process.platform === "linux") {
+  // On Linux, portal file dialogs may ignore `defaultPath` unless the backend
+  // supports a recent enough portal version. Requiring v4 preserves the portal
+  // path when supported and otherwise falls back to GTK/KDE dialogs, which do
+  // honor the requested cwd.
+  appendCommandLineSwitchIfMissing("xdg-portal-required-version", "4");
+}
+
 function logTimestamp(): string {
   return new Date().toISOString();
 }
