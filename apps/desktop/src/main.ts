@@ -1241,6 +1241,7 @@ function registerIpcHandlers(): void {
     const defaultPath =
       resolveExistingDirectoryPath(requestedDefaultPath) ??
       resolveExistingDirectoryPath(desktopBackendBootstrap.cwd) ??
+      resolveExistingDirectoryPath(STATE_DIR) ??
       resolveExistingDirectoryPath(BASE_DIR);
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const result = owner
