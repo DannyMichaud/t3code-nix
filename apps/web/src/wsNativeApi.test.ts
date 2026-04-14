@@ -213,6 +213,19 @@ describe("wsNativeApi", () => {
     expect(rpcClientMock.server.subscribeLifecycle).not.toHaveBeenCalled();
   });
 
+  it("forwards folder picker options to the desktop bridge", async () => {
+    const pickFolder = vi.fn(async () => "/tmp/sub-environment");
+    getWindowForTest().desktopBridge = makeDesktopBridge({ pickFolder });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(api.dialogs.pickFolder({ defaultPath: "/tmp/sub-environment" })).resolves.toBe(
+      "/tmp/sub-environment",
+    );
+    expect(pickFolder).toHaveBeenCalledWith({ defaultPath: "/tmp/sub-environment" });
+  });
+
   it("forwards terminal and orchestration stream events", async () => {
     const { createWsNativeApi } = await import("./wsNativeApi");
 

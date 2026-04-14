@@ -1,6 +1,7 @@
-import type { ServerProvider } from "@t3tools/contracts";
+import type { ServerProvider, ServerProviderUsageLimitWindow } from "@t3tools/contracts";
 
 import { getCanonicalProviderUsageWindows } from "~/lib/providerUsage";
+import { cn } from "~/lib/utils";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
 function formatUsedPercent(value: number | undefined): string {
@@ -16,11 +17,13 @@ function describeWindow(window: { label: string; usedPercent?: number | undefine
     : `${window.label} ${formatUsedPercent(window.usedPercent)}`;
 }
 
-export function UsageLimitsWidget(props: {
-  usageLimits: ServerProvider["usageLimits"] | null | undefined;
+export function UsageLimitsPills(props: {
+  windows: ReadonlyArray<ServerProviderUsageLimitWindow>;
+  dataTestId?: string;
+  triggerClassName?: string;
+  popupAlign?: "start" | "center" | "end";
 }) {
-  const windows = getCanonicalProviderUsageWindows(props.usageLimits);
-  if (windows.length === 0) {
+  if (props.windows.length === 0) {
     return null;
   }
 
@@ -33,11 +36,11 @@ export function UsageLimitsWidget(props: {
         render={
           <button
             type="button"
-            data-testid="usage-limits-widget"
-            className="inline-flex items-center gap-1"
-            aria-label={`Usage limits ${windows.map(describeWindow).join(", ")}`}
+            {...(props.dataTestId ? { "data-testid": props.dataTestId } : {})}
+            className={cn("inline-flex items-center gap-1", props.triggerClassName)}
+            aria-label={`Usage limits ${props.windows.map(describeWindow).join(", ")}`}
           >
-            {windows.map((window) => (
+            {props.windows.map((window) => (
               <span
                 key={window.label}
                 data-testid={`usage-limit-pill-${window.label}`}
@@ -59,12 +62,17 @@ export function UsageLimitsWidget(props: {
           </button>
         }
       />
-      <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2">
+      <PopoverPopup
+        tooltipStyle
+        side="top"
+        align={props.popupAlign ?? "end"}
+        className="w-max max-w-none px-3 py-2"
+      >
         <div className="space-y-1.5 leading-tight">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Usage limits
           </div>
-          {windows.map((window) => (
+          {props.windows.map((window) => (
             <div
               key={window.label}
               className="flex items-center justify-between gap-4 whitespace-nowrap text-xs text-foreground"
@@ -81,4 +89,11 @@ export function UsageLimitsWidget(props: {
       </PopoverPopup>
     </Popover>
   );
+}
+
+export function UsageLimitsWidget(props: {
+  usageLimits: ServerProvider["usageLimits"] | null | undefined;
+}) {
+  const windows = getCanonicalProviderUsageWindows(props.usageLimits);
+  return <UsageLimitsPills windows={windows} dataTestId="usage-limits-widget" />;
 }

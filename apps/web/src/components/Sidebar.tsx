@@ -124,10 +124,11 @@ import {
   sortThreadsForSidebar,
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
+import { SidebarProviderUsageList } from "./sidebar/SidebarProviderUsageList";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings } from "../rpc/serverState";
+import { useServerConfig, useServerKeybindings, useServerProviders } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
 const THREAD_PREVIEW_LIMIT = 6;
@@ -707,6 +708,8 @@ export default function Sidebar() {
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
   const keybindings = useServerKeybindings();
+  const serverProviders = useServerProviders();
+  const serverConfig = useServerConfig();
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
@@ -910,7 +913,9 @@ export default function Sidebar() {
     setIsPickingFolder(true);
     let pickedPath: string | null = null;
     try {
-      pickedPath = await api.dialogs.pickFolder();
+      pickedPath = await api.dialogs.pickFolder(
+        serverConfig?.cwd ? { defaultPath: serverConfig.cwd } : undefined,
+      );
     } catch {
       // Ignore picker failures and leave the current thread selection unchanged.
     }
@@ -2250,8 +2255,9 @@ export default function Sidebar() {
           </SidebarContent>
 
           <SidebarSeparator />
-          <SidebarFooter className="p-2">
+          <SidebarFooter className="flex flex-col gap-2 p-2">
             <SidebarUpdatePill />
+            <SidebarProviderUsageList providers={serverProviders} />
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton

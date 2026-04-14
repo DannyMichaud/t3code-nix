@@ -1,6 +1,15 @@
-import type { ServerProvider, ServerProviderUsageLimitWindow } from "@t3tools/contracts";
+import type {
+  ProviderKind,
+  ServerProvider,
+  ServerProviderUsageLimitWindow,
+} from "@t3tools/contracts";
 
 const CANONICAL_PROVIDER_USAGE_LABELS = ["5h", "7d"] as const;
+
+export interface SidebarProviderUsageEntry {
+  readonly provider: ProviderKind;
+  readonly windows: ReadonlyArray<ServerProviderUsageLimitWindow>;
+}
 
 export function getCanonicalProviderUsageWindows(
   usageLimits: ServerProvider["usageLimits"] | null | undefined,
@@ -23,5 +32,27 @@ export function getCanonicalProviderUsageWindows(
   return CANONICAL_PROVIDER_USAGE_LABELS.flatMap((label) => {
     const window = windowsByLabel.get(label);
     return window ? [window] : [];
+  });
+}
+
+export function getSidebarProviderUsageEntries(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<SidebarProviderUsageEntry> {
+  return providers.flatMap((provider) => {
+    if (!provider.enabled || provider.auth.status !== "authenticated") {
+      return [];
+    }
+
+    const windows = getCanonicalProviderUsageWindows(provider.usageLimits);
+    if (windows.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        provider: provider.provider,
+        windows,
+      },
+    ];
   });
 }

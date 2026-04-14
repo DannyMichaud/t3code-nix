@@ -3216,7 +3216,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("renders Codex usage pills next to the context window meter", async () => {
+  it("renders Codex usage pills in the sidebar and keeps the context window meter in the composer", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: appendContextWindowActivity(
@@ -3245,27 +3245,37 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await vi.waitFor(() => {
         const footer = document.querySelector<HTMLElement>('[data-chat-composer-actions="right"]');
-        const usageWidget = footer?.querySelector<HTMLElement>(
-          '[data-testid="usage-limits-widget"]',
-        );
         const contextMeter = footer?.querySelector<HTMLButtonElement>(
           'button[aria-label^="Context window"]',
         );
+        const sidebarUsageList = document.querySelector<HTMLElement>(
+          '[data-testid="sidebar-provider-usage-list"]',
+        );
+        const codexUsageWidget = document.querySelector<HTMLElement>(
+          '[data-testid="sidebar-provider-usage-widget-codex"]',
+        );
+        const settingsButton = Array.from(document.querySelectorAll("button")).find(
+          (element) => element.textContent?.trim() === "Settings",
+        );
 
         expect(footer).toBeTruthy();
-        expect(usageWidget?.textContent).toContain("5h");
-        expect(usageWidget?.textContent).toContain("7d");
         expect(contextMeter).toBeTruthy();
-        expect(Array.from(footer?.children ?? []).indexOf(usageWidget as HTMLElement)).toBeLessThan(
-          Array.from(footer?.children ?? []).indexOf(contextMeter as HTMLButtonElement),
-        );
+        expect(footer?.querySelector('[data-testid="usage-limits-widget"]')).toBeNull();
+        expect(sidebarUsageList?.textContent).toContain("Codex");
+        expect(codexUsageWidget?.textContent).toContain("5h");
+        expect(codexUsageWidget?.textContent).toContain("7d");
+        expect(settingsButton).toBeTruthy();
+        const footerText =
+          settingsButton?.closest('[data-slot="sidebar-footer"]')?.textContent ?? "";
+        expect(footerText.indexOf("Codex")).toBeGreaterThanOrEqual(0);
+        expect(footerText.indexOf("Settings")).toBeGreaterThan(footerText.indexOf("Codex"));
       });
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("renders Codex usage pills even when no context window meter is available", async () => {
+  it("renders Codex usage pills in the sidebar even when no context window meter is available", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -3292,16 +3302,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await vi.waitFor(() => {
         expect(
-          document.querySelector('[data-testid="usage-limits-widget"]')?.textContent,
+          document.querySelector('[data-testid="sidebar-provider-usage-widget-codex"]')
+            ?.textContent,
         ).toContain("5h");
         expect(document.querySelector('button[aria-label^="Context window"]')).toBeNull();
+        expect(document.querySelector('[data-testid="usage-limits-widget"]')).toBeNull();
       });
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("renders Claude usage pills when Claude exposes canonical windows", async () => {
+  it("renders multiple eligible provider usage groups in the sidebar", async () => {
     const claudeUsageSnapshot = createSnapshotForTargetUser({
       targetMessageId: "msg-user-claude-usage" as MessageId,
       targetText: "claude usage",
@@ -3332,7 +3344,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         nextFixture.serverConfig = {
           ...nextFixture.serverConfig,
           providers: [
-            codexProvider,
+            {
+              ...codexProvider,
+              usageLimits: createCodexUsageLimits(),
+            },
             {
               provider: "claudeAgent",
               enabled: true,
@@ -3351,9 +3366,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await vi.waitFor(() => {
-        const usageWidget = document.querySelector('[data-testid="usage-limits-widget"]');
-        expect(usageWidget?.textContent).toContain("5h");
-        expect(usageWidget?.textContent).toContain("7d");
+        const codexUsageWidget = document.querySelector(
+          '[data-testid="sidebar-provider-usage-widget-codex"]',
+        );
+        const claudeUsageWidget = document.querySelector(
+          '[data-testid="sidebar-provider-usage-widget-claudeAgent"]',
+        );
+        expect(codexUsageWidget?.textContent).toContain("5h");
+        expect(codexUsageWidget?.textContent).toContain("7d");
+        expect(claudeUsageWidget?.textContent).toContain("5h");
+        expect(claudeUsageWidget?.textContent).toContain("7d");
       });
     } finally {
       await mounted.cleanup();
@@ -3418,7 +3440,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await vi.waitFor(() => {
-        const usageWidget = document.querySelector('[data-testid="usage-limits-widget"]');
+        const usageWidget = document.querySelector(
+          '[data-testid="sidebar-provider-usage-widget-claudeAgent"]',
+        );
         expect(usageWidget?.textContent).toContain("5h");
         expect(usageWidget?.textContent).toContain("n/a");
       });
@@ -3427,7 +3451,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("hides the usage widget when the selected provider has no supported limits", async () => {
+  it("shows all eligible providers and hides providers without supported limits", async () => {
     const hiddenUsageSnapshot = createSnapshotForTargetUser({
       targetMessageId: "msg-user-usage-hidden" as MessageId,
       targetText: "usage hidden",
@@ -3489,6 +3513,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await vi.waitFor(() => {
+        const codexWidget = document.querySelector(
+          '[data-testid="sidebar-provider-usage-widget-codex"]',
+        );
+        const claudeWidget = document.querySelector(
+          '[data-testid="sidebar-provider-usage-widget-claudeAgent"]',
+        );
+
+        expect(codexWidget?.textContent).toContain("5h");
+        expect(codexWidget?.textContent).toContain("7d");
+        expect(claudeWidget).toBeNull();
         expect(document.querySelector('[data-testid="usage-limits-widget"]')).toBeNull();
       });
     } finally {
