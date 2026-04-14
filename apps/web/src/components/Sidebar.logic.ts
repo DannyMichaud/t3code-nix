@@ -162,13 +162,6 @@ export function resolveSidebarNewThreadEnvMode(input: {
   return input.requestedEnvMode ?? input.defaultEnvMode;
 }
 
-export function resolveProjectPickerDefaultPath(input: {
-  serverWelcomeCwd?: string | null;
-}): string | undefined {
-  const cwd = input.serverWelcomeCwd?.trim();
-  return cwd ? cwd : undefined;
-}
-
 export function resolveSidebarNewThreadSeedContext(input: {
   projectId: string;
   defaultEnvMode: SidebarNewThreadEnvMode;

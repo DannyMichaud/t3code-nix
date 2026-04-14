@@ -13,7 +13,6 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
-  resolveProjectPickerDefaultPath,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -165,25 +164,6 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
-  });
-});
-
-describe("resolveProjectPickerDefaultPath", () => {
-  it("prefers the server welcome cwd when available", () => {
-    expect(
-      resolveProjectPickerDefaultPath({
-        serverWelcomeCwd: "/tmp/sub-environment",
-      }),
-    ).toBe("/tmp/sub-environment");
-  });
-
-  it("omits the default path when the welcome cwd is missing or blank", () => {
-    expect(
-      resolveProjectPickerDefaultPath({
-        serverWelcomeCwd: "   ",
-      }),
-    ).toBeUndefined();
-    expect(resolveProjectPickerDefaultPath({})).toBeUndefined();
   });
 });
 

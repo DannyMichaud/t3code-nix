@@ -55,7 +55,6 @@ const selectProviders = (config: ServerConfig | null) =>
   config?.providers ?? EMPTY_SERVER_PROVIDERS;
 const selectSettings = (config: ServerConfig | null): ServerSettings =>
   config?.settings ?? DEFAULT_SERVER_SETTINGS;
-const selectWelcomeCwd = (welcome: ServerLifecycleWelcomePayload | null) => welcome?.cwd ?? null;
 
 export const welcomeAtom = makeStateAtom<ServerLifecycleWelcomePayload | null>(
   "server-welcome",
@@ -285,10 +284,6 @@ export function useServerKeybindingsConfigPath(): string | null {
 
 export function useServerObservability(): ServerConfig["observability"] | null {
   return useAtomValue(serverConfigAtom, selectObservability);
-}
-
-export function useServerWelcomeCwd(): string | null {
-  return useAtomValue(welcomeAtom, selectWelcomeCwd);
 }
 
 export function useServerWelcomeSubscription(

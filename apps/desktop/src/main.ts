@@ -1226,7 +1226,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, options: unknown) => {
-    const defaultPath =
+    const requestedDefaultPath =
       typeof options === "object" &&
       options !== null &&
       "defaultPath" in options &&
@@ -1234,6 +1234,7 @@ function registerIpcHandlers(): void {
       options.defaultPath.trim().length > 0
         ? options.defaultPath.trim()
         : undefined;
+    const defaultPath = requestedDefaultPath ?? BASE_DIR;
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const result = owner
       ? await dialog.showOpenDialog(owner, {
