@@ -5,7 +5,7 @@ import * as Path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveLinuxWaylandEnvironment } from "./linuxDisplay";
+import { resolveLinuxWaylandEnvironment } from "./linuxDisplay.js";
 
 const runtimeDirs = new Set<string>();
 const socketServers = new Set<Net.Server>();

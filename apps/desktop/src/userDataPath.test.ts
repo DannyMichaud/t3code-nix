@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveDesktopUserDataPath } from "./userDataPath";
+import { resolveDesktopUserDataPath } from "./userDataPath.js";
 
 describe("resolveDesktopUserDataPath", () => {
   it("uses the sub-environment storage directory when T3CODE_HOME is custom", () => {
@@ -21,7 +21,7 @@ describe("resolveDesktopUserDataPath", () => {
         homeDir: "/home/dannym",
         platform: "linux",
         env: {},
-        pathExists: (path) => path === "/home/dannym/.config/T3 Code (Alpha)",
+        pathExists: (path: string) => path === "/home/dannym/.config/T3 Code (Alpha)",
       }),
     ).toBe("/home/dannym/.config/T3 Code (Alpha)");
   });

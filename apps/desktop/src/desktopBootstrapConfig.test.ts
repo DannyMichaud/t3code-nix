@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveDesktopBackendBootstrapConfig } from "./desktopBootstrapConfig";
+import { resolveDesktopBackendBootstrapConfig } from "./desktopBootstrapConfig.js";
 
 describe("resolveDesktopBackendBootstrapConfig", () => {
   it("enables project auto-bootstrap when a cwd is supplied via env", () => {

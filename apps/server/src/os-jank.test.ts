@@ -1,120 +1,185 @@
-import * as FS from "node:fs/promises";
-import * as Net from "node:net";
-import * as OS from "node:os";
-import * as Path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { fixPath } from "./os-jank";
-
-const runtimeDirs = new Set<string>();
-const socketServers = new Set<Net.Server>();
-
-async function createUnixSocket(socketPath: string): Promise<void> {
-  await FS.mkdir(Path.dirname(socketPath), { recursive: true });
-
-  await new Promise<void>((resolve, reject) => {
-    const server = Net.createServer();
-    server.once("error", reject);
-    server.listen(socketPath, () => {
-      socketServers.add(server);
-      resolve();
-    });
-  });
-}
-
-async function makeRuntimeDir(): Promise<string> {
-  const runtimeDir = await FS.mkdtemp(Path.join(OS.tmpdir(), "t3code-os-jank-"));
-  runtimeDirs.add(runtimeDir);
-  return runtimeDir;
-}
-
-afterEach(async () => {
-  for (const server of socketServers) {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-  }
-  socketServers.clear();
-
-  for (const runtimeDir of runtimeDirs) {
-    await FS.rm(runtimeDir, { recursive: true, force: true });
-  }
-  runtimeDirs.clear();
-});
+import { fixPath } from "./os-jank.ts";
 
 describe("fixPath", () => {
-  it("hydrates PATH and missing SSH_AUTH_SOCK on linux using the resolved login shell", () => {
+  it("hydrates PATH on linux using the resolved login shell", () => {
     const env: NodeJS.ProcessEnv = {
       SHELL: "/bin/zsh",
-      PATH: "/usr/bin",
+      PATH: "/Users/test/.local/bin:/usr/bin",
     };
-    const readEnvironment = vi.fn(() => ({
-      PATH: "/opt/homebrew/bin:/usr/bin",
-      SSH_AUTH_SOCK: "/tmp/secretive.sock",
-    }));
+    const readPath = vi.fn(() => "/opt/homebrew/bin:/usr/bin");
 
     fixPath({
       env,
       platform: "linux",
-      readEnvironment,
+      readPath,
     });
 
-    expect(readEnvironment).toHaveBeenCalledWith("/bin/zsh", ["PATH", "SHELL", "SSH_AUTH_SOCK"]);
-    expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
-    expect(env.SSH_AUTH_SOCK).toBe("/tmp/secretive.sock");
+    expect(readPath).toHaveBeenCalledWith("/bin/zsh");
+    expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin:/Users/test/.local/bin");
   });
 
-  it("does nothing outside macOS and linux even when SHELL is set", () => {
+  it("falls back to launchctl PATH on macOS when shell probing fails", () => {
     const env: NodeJS.ProcessEnv = {
-      SHELL: "C:/Program Files/Git/bin/bash.exe",
-      PATH: "C:\\Windows\\System32",
+      SHELL: "/opt/homebrew/bin/nu",
+      PATH: "/usr/bin",
     };
-    const readEnvironment = vi.fn(() => ({
-      PATH: "/usr/local/bin:/usr/bin",
-      SSH_AUTH_SOCK: "/tmp/secretive.sock",
+    const readPath = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("unknown flag");
+      })
+      .mockImplementationOnce(() => undefined);
+    const readLaunchctlPath = vi.fn(() => "/opt/homebrew/bin:/usr/bin");
+    const logWarning = vi.fn();
+
+    fixPath({
+      env,
+      platform: "darwin",
+      readPath,
+      readLaunchctlPath,
+      userShell: "/bin/zsh",
+      logWarning,
+    });
+
+    expect(readPath).toHaveBeenNthCalledWith(1, "/opt/homebrew/bin/nu");
+    expect(readPath).toHaveBeenNthCalledWith(2, "/bin/zsh");
+    expect(readLaunchctlPath).toHaveBeenCalledTimes(1);
+    expect(logWarning).toHaveBeenCalledWith(
+      "Failed to read PATH from login shell /opt/homebrew/bin/nu.",
+      expect.any(Error),
+    );
+    expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
+  });
+
+  it("repairs PATH on Windows by merging PowerShell PATH with inherited PATH", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "C:\\Windows\\System32",
+      APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
+      USERPROFILE: "C:\\Users\\testuser",
+    };
+    const readWindowsEnvironment = vi.fn(() => ({
+      PATH: "C:\\Custom\\Bin;C:\\Windows\\System32",
     }));
+    const isWindowsCommandAvailable = vi.fn(() => true);
 
     fixPath({
       env,
       platform: "win32",
-      readEnvironment,
+      readWindowsEnvironment,
+      isWindowsCommandAvailable,
     });
 
-    expect(readEnvironment).not.toHaveBeenCalled();
-    expect(env.PATH).toBe("C:\\Windows\\System32");
+    expect(readWindowsEnvironment).toHaveBeenCalledWith(["PATH"], { loadProfile: false });
+    expect(env.PATH).toBe(
+      [
+        "C:\\Users\\testuser\\AppData\\Roaming\\npm",
+        "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs",
+        "C:\\Users\\testuser\\AppData\\Local\\Volta\\bin",
+        "C:\\Users\\testuser\\AppData\\Local\\pnpm",
+        "C:\\Users\\testuser\\.bun\\bin",
+        "C:\\Users\\testuser\\scoop\\shims",
+        "C:\\Custom\\Bin",
+        "C:\\Windows\\System32",
+      ].join(";"),
+    );
   });
 
-  it("recovers the active Hyprland instance signature for linux server sessions", async () => {
-    const runtimeDir = await makeRuntimeDir();
-    const hyprRuntimeDir = Path.join(runtimeDir, "hypr", "instance-a");
-    await FS.mkdir(hyprRuntimeDir, { recursive: true });
-    await FS.writeFile(Path.join(hyprRuntimeDir, "hyprland.lock"), "2554\nwayland-1\n");
-    await createUnixSocket(Path.join(hyprRuntimeDir, ".socket.sock"));
-    await createUnixSocket(Path.join(runtimeDir, "wayland-1"));
-
+  it("applies profile-derived fnm variables on Windows when node is missing", () => {
     const env: NodeJS.ProcessEnv = {
-      PATH: "/usr/bin",
-      WAYLAND_DISPLAY: "wayland-1",
-      XDG_RUNTIME_DIR: runtimeDir,
+      PATH: "C:\\Windows\\System32",
+      APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
+      USERPROFILE: "C:\\Users\\testuser",
     };
+    const readWindowsEnvironment = vi.fn(
+      (_names: ReadonlyArray<string>, options?: { loadProfile?: boolean }) =>
+        options?.loadProfile
+          ? {
+              PATH: "C:\\Profile\\Node;C:\\Windows\\System32",
+              FNM_DIR: "C:\\Users\\testuser\\AppData\\Roaming\\fnm",
+              FNM_MULTISHELL_PATH: "C:\\Users\\testuser\\AppData\\Local\\fnm_multishells\\123",
+            }
+          : { PATH: "C:\\Custom\\Bin;C:\\Windows\\System32" },
+    );
+    const isWindowsCommandAvailable = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
 
     fixPath({
       env,
-      platform: "linux",
-      readEnvironment: () => ({
-        PATH: "/usr/bin",
-      }),
+      platform: "win32",
+      readWindowsEnvironment,
+      isWindowsCommandAvailable,
     });
 
-    expect(env.HYPRLAND_INSTANCE_SIGNATURE).toBe("instance-a");
-    expect(env.WAYLAND_DISPLAY).toBe("wayland-1");
-    expect(env.XDG_SESSION_TYPE).toBe("wayland");
+    expect(env.PATH).toBe(
+      [
+        "C:\\Profile\\Node",
+        "C:\\Windows\\System32",
+        "C:\\Users\\testuser\\AppData\\Roaming\\npm",
+        "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs",
+        "C:\\Users\\testuser\\AppData\\Local\\Volta\\bin",
+        "C:\\Users\\testuser\\AppData\\Local\\pnpm",
+        "C:\\Users\\testuser\\.bun\\bin",
+        "C:\\Users\\testuser\\scoop\\shims",
+        "C:\\Custom\\Bin",
+      ].join(";"),
+    );
+    expect(env.FNM_DIR).toBe("C:\\Users\\testuser\\AppData\\Roaming\\fnm");
+    expect(env.FNM_MULTISHELL_PATH).toBe(
+      "C:\\Users\\testuser\\AppData\\Local\\fnm_multishells\\123",
+    );
+  });
+
+  it("preserves baseline PATH on Windows when the profile probe fails", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "C:\\Windows\\System32",
+      APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
+      USERPROFILE: "C:\\Users\\testuser",
+    };
+    const readWindowsEnvironment = vi.fn(
+      (_names: ReadonlyArray<string>, options?: { loadProfile?: boolean }) => {
+        if (options?.loadProfile) {
+          throw new Error("profile load failed");
+        }
+        return { PATH: "C:\\Custom\\Bin;C:\\Windows\\System32" };
+      },
+    );
+    const isWindowsCommandAvailable = vi.fn(() => false);
+
+    fixPath({
+      env,
+      platform: "win32",
+      readWindowsEnvironment,
+      isWindowsCommandAvailable,
+    });
+
+    expect(env.PATH).toBe(
+      [
+        "C:\\Users\\testuser\\AppData\\Roaming\\npm",
+        "C:\\Users\\testuser\\.bun\\bin",
+        "C:\\Users\\testuser\\scoop\\shims",
+        "C:\\Custom\\Bin",
+        "C:\\Windows\\System32",
+      ].join(";"),
+    );
+  });
+
+  it("does nothing on unsupported platforms", () => {
+    const env: NodeJS.ProcessEnv = {
+      SHELL: "C:/Program Files/Git/bin/bash.exe",
+      PATH: "C:\\Windows\\System32",
+    };
+    const readPath = vi.fn(() => "/usr/local/bin:/usr/bin");
+
+    fixPath({
+      env,
+      platform: "freebsd",
+      readPath,
+    });
+
+    expect(readPath).not.toHaveBeenCalled();
+    expect(env.PATH).toBe("C:\\Windows\\System32");
   });
 });

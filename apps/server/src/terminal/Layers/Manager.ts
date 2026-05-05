@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -9,7 +8,6 @@ import {
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import {
-  Data,
   Effect,
   Encoding,
   Equal,
@@ -18,18 +16,19 @@ import {
   FileSystem,
   Layer,
   Option,
+  Schema,
   Scope,
   Semaphore,
   SynchronizedRef,
 } from "effect";
 
-import { ServerConfig } from "../../config";
+import { ServerConfig } from "../../config.ts";
 import {
   increment,
   terminalRestartsTotal,
   terminalSessionsTotal,
-} from "../../observability/Metrics";
-import { runProcess } from "../../processRunner";
+} from "../../observability/Metrics.ts";
+import { runProcess } from "../../processRunner.ts";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -37,14 +36,14 @@ import {
   TerminalNotRunningError,
   TerminalSessionLookupError,
   type TerminalManagerShape,
-} from "../Services/Manager";
+} from "../Services/Manager.ts";
 import {
   PtyAdapter,
   PtySpawnError,
   type PtyAdapterShape,
   type PtyExitEvent,
   type PtyProcess,
-} from "../Services/PTY";
+} from "../Services/PTY.ts";
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
 const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
@@ -53,59 +52,30 @@ const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
-const POSIX_TERMINAL_TYPE = "xterm-256color";
-const WINDOWS_TERMINAL_TYPE = "xterm-color";
-const TERMINAL_ENV_BLOCKLIST = new Set([
-  "PORT",
-  "ELECTRON_RENDERER_PORT",
-  "ELECTRON_RUN_AS_NODE",
-  "TERM",
-  "TERM_PROGRAM",
-  "TERM_PROGRAM_VERSION",
-  "PROMPT_COMMAND",
-  "PS1",
-  "PS2",
-  "PS4",
-  "BASH_ENV",
-  "ENV",
-  "INSIDE_EMACS",
-  "TMUX",
-  "TMUX_PANE",
-  "STY",
-  "WINDOW",
-  "WINDOWID",
-  "WT_SESSION",
-  "WT_PROFILE_ID",
-  "WT_SPAWNED",
-  "VTE_VERSION",
-  "SHELL_PROMPT_PREFIX",
-  "SHELL_PROMPT_SUFFIX",
-]);
-const TERMINAL_ENV_BLOCKED_PREFIXES = [
-  "KITTY_",
-  "WEZTERM_",
-  "ITERM_",
-  "ALACRITTY_",
-  "GHOSTTY_",
-  "KONSOLE_",
-] as const;
+const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
 
-type TerminalSubprocessChecker = (
-  terminalPid: number,
-) => Effect.Effect<boolean, TerminalSubprocessCheckError>;
+class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubprocessCheckError>()(
+  "TerminalSubprocessCheckError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+    terminalPid: Schema.Number,
+    command: Schema.Literals(["powershell", "pgrep", "ps"]),
+  },
+) {}
 
-class TerminalSubprocessCheckError extends Data.TaggedError("TerminalSubprocessCheckError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-  readonly terminalPid: number;
-  readonly command: "powershell" | "pgrep" | "ps";
-}> {}
+class TerminalProcessSignalError extends Schema.TaggedErrorClass<TerminalProcessSignalError>()(
+  "TerminalProcessSignalError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+    signal: Schema.Literals(["SIGTERM", "SIGKILL"]),
+  },
+) {}
 
-class TerminalProcessSignalError extends Data.TaggedError("TerminalProcessSignalError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-  readonly signal: "SIGTERM" | "SIGKILL";
-}> {}
+interface TerminalSubprocessChecker {
+  (terminalPid: number): Effect.Effect<boolean, TerminalSubprocessCheckError>;
+}
 
 interface ShellCandidate {
   shell: string;
@@ -216,29 +186,25 @@ function enqueueProcessEvent(
   return true;
 }
 
-function defaultShellResolver(): string {
-  if (process.platform === "win32") {
-    return process.env.ComSpec ?? "cmd.exe";
+function defaultShellResolver(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform === "win32") {
+    return "pwsh.exe";
   }
-
-  try {
-    const loginShell = os.userInfo().shell?.trim();
-    if (loginShell && loginShell.length > 0) {
-      return loginShell;
-    }
-  } catch {
-    // Fall back to inherited process env below.
-  }
-
-  return process.env.SHELL ?? "bash";
+  return env.SHELL ?? "bash";
 }
 
-function normalizeShellCommand(value: string | undefined): string | null {
+function normalizeShellCommand(
+  value: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
 
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     return trimmed;
   }
 
@@ -247,13 +213,40 @@ function normalizeShellCommand(value: string | undefined): string | null {
   return firstToken.replace(/^['"]|['"]$/g, "");
 }
 
-function shellCandidateFromCommand(command: string | null): ShellCandidate | null {
+function shellCandidateFromCommand(
+  command: string | null,
+  platform: NodeJS.Platform = process.platform,
+): ShellCandidate | null {
   if (!command || command.length === 0) return null;
-  const shellName = path.basename(command).toLowerCase();
-  if (process.platform !== "win32" && shellName === "zsh") {
+  const shellName =
+    platform === "win32"
+      ? path.win32.basename(command).toLowerCase()
+      : path.basename(command).toLowerCase();
+  if (platform === "win32" && (shellName === "pwsh.exe" || shellName === "powershell.exe")) {
+    return { shell: command, args: ["-NoLogo"] };
+  }
+  if (platform !== "win32" && shellName === "zsh") {
     return { shell: command, args: ["-o", "nopromptsp"] };
   }
   return { shell: command };
+}
+
+function windowsSystemRoot(env: NodeJS.ProcessEnv): string {
+  return env.SystemRoot?.trim() || env.windir?.trim() || "C:\\Windows";
+}
+
+function windowsPowerShellPath(env: NodeJS.ProcessEnv): string {
+  return path.win32.join(
+    windowsSystemRoot(env),
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+}
+
+function windowsCmdPath(env: NodeJS.ProcessEnv): string {
+  return path.win32.join(windowsSystemRoot(env), "System32", "cmd.exe");
 }
 
 function formatShellCandidate(candidate: ShellCandidate): string {
@@ -274,27 +267,37 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
   return ordered;
 }
 
-function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
-  const requested = shellCandidateFromCommand(normalizeShellCommand(shellResolver()));
+function resolveShellCandidates(
+  shellResolver: () => string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): ShellCandidate[] {
+  const requested = shellCandidateFromCommand(
+    normalizeShellCommand(shellResolver(), platform),
+    platform,
+  );
 
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     return uniqueShellCandidates([
       requested,
-      shellCandidateFromCommand(process.env.ComSpec ?? null),
-      shellCandidateFromCommand("powershell.exe"),
-      shellCandidateFromCommand("cmd.exe"),
+      shellCandidateFromCommand("pwsh.exe", platform),
+      shellCandidateFromCommand(windowsPowerShellPath(env), platform),
+      shellCandidateFromCommand("powershell.exe", platform),
+      shellCandidateFromCommand(env.ComSpec ?? null, platform),
+      shellCandidateFromCommand(windowsCmdPath(env), platform),
+      shellCandidateFromCommand("cmd.exe", platform),
     ]);
   }
 
   return uniqueShellCandidates([
     requested,
-    shellCandidateFromCommand(normalizeShellCommand(process.env.SHELL)),
-    shellCandidateFromCommand("/bin/zsh"),
-    shellCandidateFromCommand("/bin/bash"),
-    shellCandidateFromCommand("/bin/sh"),
-    shellCandidateFromCommand("zsh"),
-    shellCandidateFromCommand("bash"),
-    shellCandidateFromCommand("sh"),
+    shellCandidateFromCommand(normalizeShellCommand(env.SHELL, platform), platform),
+    shellCandidateFromCommand("/bin/zsh", platform),
+    shellCandidateFromCommand("/bin/bash", platform),
+    shellCandidateFromCommand("/bin/sh", platform),
+    shellCandidateFromCommand("zsh", platform),
+    shellCandidateFromCommand("bash", platform),
+    shellCandidateFromCommand("sh", platform),
   ]);
 }
 
@@ -317,9 +320,8 @@ function isRetryableShellSpawnError(error: PtySpawnError): boolean {
 
     if (current instanceof Error) {
       messages.push(current.message);
-      const cause = (current as { cause?: unknown }).cause;
-      if (cause) {
-        queue.push(cause);
+      if (current.cause) {
+        queue.push(current.cause);
       }
       continue;
     }
@@ -657,9 +659,6 @@ function shouldExcludeTerminalEnvKey(key: string): boolean {
   if (normalizedKey.startsWith("VITE_")) {
     return true;
   }
-  if (TERMINAL_ENV_BLOCKED_PREFIXES.some((prefix) => normalizedKey.startsWith(prefix))) {
-    return true;
-  }
   return TERMINAL_ENV_BLOCKLIST.has(normalizedKey);
 }
 
@@ -678,11 +677,6 @@ function createTerminalSpawnEnv(
       spawnEnv[key] = value;
     }
   }
-  spawnEnv.TERM = process.platform === "win32" ? WINDOWS_TERMINAL_TYPE : POSIX_TERMINAL_TYPE;
-  spawnEnv.TERM_PROGRAM = "t3code";
-  if (process.platform !== "win32" && !spawnEnv.COLORTERM) {
-    spawnEnv.COLORTERM = "truecolor";
-  }
   return spawnEnv;
 }
 
@@ -700,6 +694,8 @@ interface TerminalManagerOptions {
   historyLineLimit?: number;
   ptyAdapter: PtyAdapterShape;
   shellResolver?: () => string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
   subprocessChecker?: TerminalSubprocessChecker;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
@@ -718,12 +714,14 @@ const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
 export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWithOptions")(
   function* (options: TerminalManagerOptions) {
     const fileSystem = yield* FileSystem.FileSystem;
-    const services = yield* Effect.services();
-    const runFork = Effect.runForkWith(services);
+    const context = yield* Effect.context<never>();
+    const runFork = Effect.runForkWith(context);
 
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
-    const shellResolver = options.shellResolver ?? defaultShellResolver;
+    const platform = options.platform ?? process.platform;
+    const baseEnv = options.env ?? process.env;
+    const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
     const subprocessChecker = options.subprocessChecker ?? defaultSubprocessChecker;
     const subprocessPollIntervalMs =
       options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS;
@@ -930,7 +928,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             Effect.logWarning("failed to persist terminal history", {
               threadId,
               terminalId,
-              error: error instanceof Error ? error.message : String(error),
+              error,
             }),
           ),
         );
@@ -1013,7 +1011,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         Effect.catch((cleanupError) =>
           Effect.logWarning("failed to remove legacy terminal history", {
             threadId,
-            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            error: cleanupError,
           }),
         ),
       );
@@ -1029,7 +1027,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           Effect.logWarning("failed to delete terminal history", {
             threadId,
             terminalId,
-            error: error instanceof Error ? error.message : String(error),
+            error,
           }),
         ),
       );
@@ -1039,7 +1037,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             Effect.logWarning("failed to delete terminal history", {
               threadId,
               terminalId,
-              error: error instanceof Error ? error.message : String(error),
+              error,
             }),
           ),
         );
@@ -1065,7 +1063,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             Effect.catch((error) =>
               Effect.logWarning("failed to delete terminal histories for thread", {
                 threadId,
-                error: error instanceof Error ? error.message : String(error),
+                error,
               }),
             ),
           ),
@@ -1386,8 +1384,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const shellCandidates = resolveShellCandidates(shellResolver);
-              const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
+              const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+              const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
               const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
               ptyProcess = spawnResult.process;
               startedShell = spawnResult.shellLabel;
@@ -1517,12 +1515,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         const terminalPid = session.pid;
         const hasRunningSubprocess = yield* subprocessChecker(terminalPid).pipe(
           Effect.map(Option.some),
-          Effect.catch((error) =>
+          Effect.catch((reason) =>
             Effect.logWarning("failed to check terminal subprocess activity", {
               threadId: session.threadId,
               terminalId: session.terminalId,
               terminalPid,
-              error: error instanceof Error ? error.message : String(error),
+              reason,
             }).pipe(Effect.as(Option.none<boolean>())),
           ),
         );

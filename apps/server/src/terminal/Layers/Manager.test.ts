@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -25,25 +24,28 @@ import {
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
-import type { TerminalManagerShape } from "../Services/Manager";
+import type { TerminalManagerShape } from "../Services/Manager.ts";
 import {
   type PtyAdapterShape,
   type PtyExitEvent,
   type PtyProcess,
   type PtySpawnInput,
   PtySpawnError,
-} from "../Services/PTY";
-import { makeTerminalManagerWithOptions } from "./Manager";
+} from "../Services/PTY.ts";
+import { makeTerminalManagerWithOptions } from "./Manager.ts";
 
 class FakePtyProcess implements PtyProcess {
   readonly writes: string[] = [];
   readonly resizeCalls: Array<{ cols: number; rows: number }> = [];
   readonly killSignals: Array<string | undefined> = [];
+  readonly pid: number;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: PtyExitEvent) => void>();
   killed = false;
 
-  constructor(readonly pid: number) {}
+  constructor(pid: number) {
+    this.pid = pid;
+  }
 
   write(data: string): void {
     this.writes.push(data);
@@ -89,9 +91,12 @@ class FakePtyAdapter implements PtyAdapterShape {
   readonly spawnInputs: PtySpawnInput[] = [];
   readonly processes: FakePtyProcess[] = [];
   readonly spawnFailures: Error[] = [];
+  private readonly mode: "sync" | "async";
   private nextPid = 9000;
 
-  constructor(private readonly mode: "sync" | "async" = "sync") {}
+  constructor(mode: "sync" | "async" = "sync") {
+    this.mode = mode;
+  }
 
   spawn(input: PtySpawnInput): Effect.Effect<PtyProcess, PtySpawnError> {
     this.spawnInputs.push(input);
@@ -189,6 +194,8 @@ function multiTerminalHistoryLogPath(
 
 interface CreateManagerOptions {
   shellResolver?: () => string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
   subprocessChecker?: (terminalPid: number) => Effect.Effect<boolean>;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
@@ -223,6 +230,8 @@ const createManager = (
         historyLineLimit,
         ptyAdapter,
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
+        ...(options.platform !== undefined ? { platform: options.platform } : {}),
+        ...(options.env !== undefined ? { env: options.env } : {}),
         ...(options.subprocessChecker !== undefined
           ? { subprocessChecker: options.subprocessChecker }
           : {}),
@@ -292,6 +301,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
   it.effect("preserves non-notFound cwd stat failures", () =>
     Effect.gen(function* () {
+      if (process.platform === "win32") return;
+
       const { manager, baseDir } = yield* createManager();
       const blockedRoot = path.join(baseDir, "blocked-root");
       const blockedCwd = path.join(blockedRoot, "cwd");
@@ -822,8 +833,12 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
   it.effect("retries with fallback shells when preferred shell spawn fails", () =>
     Effect.gen(function* () {
+      const missingShell =
+        process.platform === "win32"
+          ? "C:\\definitely\\missing-shell.exe"
+          : "/definitely/missing-shell -l";
       const { manager, ptyAdapter } = yield* createManager(5, {
-        shellResolver: () => "/definitely/missing-shell -l",
+        shellResolver: () => missingShell,
       });
       ptyAdapter.spawnFailures.push(new Error("posix_spawnp failed."));
 
@@ -831,12 +846,17 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
       assert.equal(snapshot.status, "running");
       expect(ptyAdapter.spawnInputs.length).toBeGreaterThanOrEqual(2);
-      expect(ptyAdapter.spawnInputs[0]?.shell).toBe("/definitely/missing-shell");
+      expect(ptyAdapter.spawnInputs[0]?.shell).toBe(
+        process.platform === "win32" ? missingShell : "/definitely/missing-shell",
+      );
 
       if (process.platform === "win32") {
         expect(
           ptyAdapter.spawnInputs.some(
-            (input) => input.shell === "cmd.exe" || input.shell === "powershell.exe",
+            (input) =>
+              input.shell === "pwsh.exe" ||
+              input.shell === "powershell.exe" ||
+              input.shell === "cmd.exe",
           ),
         ).toBe(true);
       } else {
@@ -849,34 +869,53 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
-  it.effect("prefers the account login shell over an inherited sh wrapper shell", () =>
+  it.effect("prefers PowerShell over ComSpec for Windows terminals", () =>
     Effect.gen(function* () {
-      if (process.platform === "win32") return;
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        platform: "win32",
+        env: {
+          ComSpec: "C:\\Windows\\System32\\cmd.exe",
+          PATH: "C:\\Windows\\System32",
+          SystemRoot: "C:\\Windows",
+        },
+      });
 
-      const loginShell = os.userInfo().shell;
-      if (!loginShell) return;
+      yield* manager.open(openInput());
 
-      const loginShellName = path.basename(loginShell).toLowerCase();
-      if (loginShellName === "sh") return;
+      expect(ptyAdapter.spawnInputs[0]).toEqual(
+        expect.objectContaining({
+          shell: "pwsh.exe",
+          args: ["-NoLogo"],
+        }),
+      );
+    }),
+  );
 
-      const previousShell = process.env.SHELL;
-      process.env.SHELL = "/bin/sh";
+  it.effect("falls back to built-in PowerShell by absolute path on Windows", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        platform: "win32",
+        env: {
+          ComSpec: "C:\\Windows\\System32\\cmd.exe",
+          PATH: "C:\\Windows\\System32",
+          SystemRoot: "C:\\Windows",
+        },
+        shellResolver: () => "C:\\missing\\custom-shell.exe",
+      });
+      ptyAdapter.spawnFailures.push(
+        new Error("spawn custom-shell.exe ENOENT"),
+        new Error("spawn pwsh.exe ENOENT"),
+      );
 
-      try {
-        const { manager, ptyAdapter } = yield* createManager();
-        yield* manager.open(openInput());
-        const spawnInput = ptyAdapter.spawnInputs[0];
-        expect(spawnInput).toBeDefined();
-        if (!spawnInput) return;
+      yield* manager.open(openInput());
 
-        expect(path.basename(spawnInput.shell).toLowerCase()).toBe(loginShellName);
-      } finally {
-        if (previousShell === undefined) {
-          delete process.env.SHELL;
-        } else {
-          process.env.SHELL = previousShell;
-        }
-      }
+      expect(ptyAdapter.spawnInputs.map((input) => input.shell)).toEqual([
+        "C:\\missing\\custom-shell.exe",
+        "pwsh.exe",
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      ]);
+      expect(ptyAdapter.spawnInputs[1]?.args).toEqual(["-NoLogo"]);
+      expect(ptyAdapter.spawnInputs[2]?.args).toEqual(["-NoLogo"]);
     }),
   );
 
@@ -919,61 +958,6 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
         expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
         expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
-      } finally {
-        restoreEnv();
-      }
-    }),
-  );
-
-  it.effect("normalizes inherited terminal-emulator env for spawned terminals", () =>
-    Effect.gen(function* () {
-      const originalValues = new Map<string, string | undefined>();
-      const setEnv = (key: string, value: string | undefined) => {
-        if (!originalValues.has(key)) {
-          originalValues.set(key, process.env[key]);
-        }
-        if (value === undefined) {
-          delete process.env[key];
-          return;
-        }
-        process.env[key] = value;
-      };
-      const restoreEnv = () => {
-        for (const [key, value] of originalValues) {
-          if (value === undefined) {
-            delete process.env[key];
-          } else {
-            process.env[key] = value;
-          }
-        }
-      };
-
-      setEnv("TERM", "xterm-kitty");
-      setEnv("TERM_PROGRAM", "kitty");
-      setEnv("KITTY_INSTALLATION_DIR", "/opt/kitty");
-      setEnv("KITTY_PID", "4242");
-      setEnv("TMUX", "/tmp/tmux-1000/default,123,0");
-      setEnv("WEZTERM_PANE", "9");
-      setEnv("PROMPT_COMMAND", "echo inherited");
-      setEnv("PS1", "broken prompt");
-      delete process.env.COLORTERM;
-
-      try {
-        const { manager, ptyAdapter } = yield* createManager();
-        yield* manager.open(openInput());
-        const spawnInput = ptyAdapter.spawnInputs[0];
-        expect(spawnInput).toBeDefined();
-        if (!spawnInput) return;
-
-        expect(spawnInput.env.TERM).toBe("xterm-256color");
-        expect(spawnInput.env.TERM_PROGRAM).toBe("t3code");
-        expect(spawnInput.env.COLORTERM).toBe("truecolor");
-        expect(spawnInput.env.KITTY_INSTALLATION_DIR).toBeUndefined();
-        expect(spawnInput.env.KITTY_PID).toBeUndefined();
-        expect(spawnInput.env.TMUX).toBeUndefined();
-        expect(spawnInput.env.WEZTERM_PANE).toBeUndefined();
-        expect(spawnInput.env.PROMPT_COMMAND).toBeUndefined();
-        expect(spawnInput.env.PS1).toBeUndefined();
       } finally {
         restoreEnv();
       }
