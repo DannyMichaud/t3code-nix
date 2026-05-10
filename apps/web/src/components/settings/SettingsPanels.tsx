@@ -25,7 +25,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
-import { useTheme } from "../../hooks/useTheme";
+import { DEFAULT_THEME, useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
@@ -88,8 +88,8 @@ const THEME_OPTIONS = [
     label: "Dark",
   },
   {
-    value: "gruvbox",
-    label: "Gruvbox",
+    value: "gruvbox-dark",
+    label: "Gruvbox Dark",
   },
 ] as const;
 
@@ -383,7 +383,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 
   const changedSettingLabels = useMemo(
     () => [
-      ...(theme !== "system" ? ["Theme"] : []),
+      ...(theme !== DEFAULT_THEME ? ["Theme"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -440,7 +440,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     );
     if (!confirmed) return;
 
-    setTheme("system");
+    setTheme(DEFAULT_THEME);
     resetSettings();
     onRestored?.();
   }, [changedSettingLabels, onRestored, resetSettings, setTheme]);
@@ -802,8 +802,8 @@ export function GeneralSettingsPanel() {
           title="Theme"
           description="Choose how T3 Code looks across the app."
           resetAction={
-            theme !== "system" ? (
-              <SettingResetButton label="theme" onClick={() => setTheme("system")} />
+            theme !== DEFAULT_THEME ? (
+              <SettingResetButton label="theme" onClick={() => setTheme(DEFAULT_THEME)} />
             ) : null
           }
           control={
@@ -814,7 +814,7 @@ export function GeneralSettingsPanel() {
                   value === "system" ||
                   value === "light" ||
                   value === "dark" ||
-                  value === "gruvbox"
+                  value === "gruvbox-dark"
                 ) {
                   setTheme(value);
                 }

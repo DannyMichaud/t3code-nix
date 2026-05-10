@@ -19,20 +19,25 @@
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
         try {
           const storedTheme = window.localStorage.getItem("t3code:theme");
+          const normalizedStoredTheme = storedTheme === "gruvbox" ? "gruvbox-dark" : storedTheme;
           const theme =
-            storedTheme === "light" ||
-            storedTheme === "dark" ||
-            storedTheme === "system" ||
-            storedTheme === "gruvbox"
-              ? storedTheme
-              : "system";
+            normalizedStoredTheme === "light" ||
+            normalizedStoredTheme === "dark" ||
+            normalizedStoredTheme === "system" ||
+            normalizedStoredTheme === "gruvbox-dark"
+              ? normalizedStoredTheme
+              : "gruvbox-dark";
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const isDark =
-            theme === "dark" || theme === "gruvbox" || (theme === "system" && prefersDark);
+            theme === "dark" || theme === "gruvbox-dark" || (theme === "system" && prefersDark);
           document.documentElement.classList.toggle("dark", isDark);
-          document.documentElement.classList.toggle("theme-gruvbox", theme === "gruvbox");
+          document.documentElement.classList.toggle("theme-gruvbox", theme === "gruvbox-dark");
           const chromeColor =
-            theme === "gruvbox" ? GRUVBOX_BACKGROUND : isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
+            theme === "gruvbox-dark"
+              ? GRUVBOX_BACKGROUND
+              : isDark
+                ? DARK_BACKGROUND
+                : LIGHT_BACKGROUND;
           document.documentElement.style.backgroundColor = chromeColor;
           themeColorMeta?.setAttribute("content", chromeColor);
         } catch {

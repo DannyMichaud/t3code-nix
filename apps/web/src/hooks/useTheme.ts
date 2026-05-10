@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-type Theme = "light" | "dark" | "system" | "gruvbox";
+type Theme = "light" | "dark" | "system" | "gruvbox-dark";
+type DesktopTheme = Exclude<Theme, "gruvbox-dark">;
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
@@ -8,8 +9,9 @@ type ThemeSnapshot = {
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+export const DEFAULT_THEME = "gruvbox-dark" satisfies Theme;
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
+  theme: DEFAULT_THEME,
   systemDark: false,
 };
 const THEME_COLOR_META_NAME = "theme-color";
@@ -17,7 +19,7 @@ const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data
 
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
-let lastDesktopTheme: Theme | null = null;
+let lastDesktopTheme: DesktopTheme | null = null;
 
 function emitChange() {
   for (const listener of listeners) listener();
@@ -34,7 +36,8 @@ function getSystemDark() {
 function getStored(): Theme {
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT.theme;
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === "light" || raw === "dark" || raw === "system" || raw === "gruvbox") return raw;
+  if (raw === "gruvbox") return "gruvbox-dark";
+  if (raw === "light" || raw === "dark" || raw === "system" || raw === "gruvbox-dark") return raw;
   return DEFAULT_THEME_SNAPSHOT.theme;
 }
 
@@ -92,9 +95,10 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || theme === "gruvbox" || (theme === "system" && getSystemDark());
+  const isDark =
+    theme === "dark" || theme === "gruvbox-dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
-  document.documentElement.classList.toggle("theme-gruvbox", theme === "gruvbox");
+  document.documentElement.classList.toggle("theme-gruvbox", theme === "gruvbox-dark");
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -110,7 +114,7 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
-  const desktopTheme = theme === "gruvbox" ? "dark" : theme;
+  const desktopTheme: DesktopTheme = theme === "gruvbox-dark" ? "dark" : theme;
   if (!bridge || lastDesktopTheme === desktopTheme) {
     return;
   }
@@ -182,7 +186,7 @@ export function useTheme() {
       ? snapshot.systemDark
         ? "dark"
         : "light"
-      : theme === "gruvbox"
+      : theme === "gruvbox-dark"
         ? "dark"
         : theme;
 
