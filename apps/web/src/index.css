@@ -144,6 +144,36 @@
   }
 }
 
+:root.theme-gruvbox {
+  color-scheme: dark;
+  --background: #282828;
+  --app-chrome-background: var(--background);
+  --foreground: #ebdbb2;
+  --card: #32302f;
+  --card-foreground: #ebdbb2;
+  --popover: #32302f;
+  --popover-foreground: #ebdbb2;
+  --primary: #d79921;
+  --primary-foreground: #282828;
+  --secondary: color-mix(in srgb, #ebdbb2 8%, transparent);
+  --secondary-foreground: #ebdbb2;
+  --muted: color-mix(in srgb, #ebdbb2 7%, transparent);
+  --muted-foreground: #a89984;
+  --accent: color-mix(in srgb, #d79921 16%, transparent);
+  --accent-foreground: #fbf1c7;
+  --destructive: #cc241d;
+  --border: color-mix(in srgb, #ebdbb2 12%, transparent);
+  --input: color-mix(in srgb, #ebdbb2 14%, transparent);
+  --ring: #fabd2f;
+  --destructive-foreground: #fb4934;
+  --info: #458588;
+  --info-foreground: #83a598;
+  --success: #98971a;
+  --success-foreground: #b8bb26;
+  --warning: #d79921;
+  --warning-foreground: #fabd2f;
+}
+
 body {
   font-family:
     "DM Sans",
@@ -231,6 +261,14 @@ code {
 
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.18);
+}
+
+.theme-gruvbox ::-webkit-scrollbar-thumb {
+  background: rgba(235, 219, 178, 0.16);
+}
+
+.theme-gruvbox ::-webkit-scrollbar-thumb:hover {
+  background: rgba(235, 219, 178, 0.26);
 }
 
 .turn-chip-strip {

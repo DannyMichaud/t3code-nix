@@ -104,6 +104,7 @@ function normalizeComputedColor(value: string | null | undefined, fallback: stri
 
 function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
   const isDark = document.documentElement.classList.contains("dark");
+  const isGruvbox = document.documentElement.classList.contains("theme-gruvbox");
   const fallbackBackground = isDark ? "rgb(14, 18, 24)" : "rgb(255, 255, 255)";
   const fallbackForeground = isDark ? "rgb(237, 241, 247)" : "rgb(28, 33, 41)";
   const drawerSurface =
@@ -120,6 +121,34 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
     drawerStyles.color,
     normalizeComputedColor(bodyStyles.color, fallbackForeground),
   );
+
+  if (isGruvbox) {
+    return {
+      background,
+      foreground,
+      cursor: "rgb(250, 189, 47)",
+      selectionBackground: "rgba(250, 189, 47, 0.24)",
+      scrollbarSliderBackground: "rgba(235, 219, 178, 0.16)",
+      scrollbarSliderHoverBackground: "rgba(235, 219, 178, 0.26)",
+      scrollbarSliderActiveBackground: "rgba(235, 219, 178, 0.32)",
+      black: "rgb(40, 40, 40)",
+      red: "rgb(204, 36, 29)",
+      green: "rgb(152, 151, 26)",
+      yellow: "rgb(215, 153, 33)",
+      blue: "rgb(69, 133, 136)",
+      magenta: "rgb(177, 98, 134)",
+      cyan: "rgb(104, 157, 106)",
+      white: "rgb(168, 153, 132)",
+      brightBlack: "rgb(146, 131, 116)",
+      brightRed: "rgb(251, 73, 52)",
+      brightGreen: "rgb(184, 187, 38)",
+      brightYellow: "rgb(250, 189, 47)",
+      brightBlue: "rgb(131, 165, 152)",
+      brightMagenta: "rgb(211, 134, 155)",
+      brightCyan: "rgb(142, 192, 124)",
+      brightWhite: "rgb(235, 219, 178)",
+    };
+  }
 
   if (isDark) {
     return {

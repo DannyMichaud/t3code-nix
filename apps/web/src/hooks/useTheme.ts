@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-type Theme = "light" | "dark" | "system";
+type Theme = "light" | "dark" | "system" | "gruvbox";
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
@@ -34,7 +34,7 @@ function getSystemDark() {
 function getStored(): Theme {
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT.theme;
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  if (raw === "light" || raw === "dark" || raw === "system" || raw === "gruvbox") return raw;
   return DEFAULT_THEME_SNAPSHOT.theme;
 }
 
@@ -92,8 +92,9 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && getSystemDark());
+  const isDark = theme === "dark" || theme === "gruvbox" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
+  document.documentElement.classList.toggle("theme-gruvbox", theme === "gruvbox");
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -109,13 +110,14 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
-  if (!bridge || lastDesktopTheme === theme) {
+  const desktopTheme = theme === "gruvbox" ? "dark" : theme;
+  if (!bridge || lastDesktopTheme === desktopTheme) {
     return;
   }
 
-  lastDesktopTheme = theme;
-  void bridge.setTheme(theme).catch(() => {
-    if (lastDesktopTheme === theme) {
+  lastDesktopTheme = desktopTheme;
+  void bridge.setTheme(desktopTheme).catch(() => {
+    if (lastDesktopTheme === desktopTheme) {
       lastDesktopTheme = null;
     }
   });
@@ -176,7 +178,13 @@ export function useTheme() {
   const theme = snapshot.theme;
 
   const resolvedTheme: "light" | "dark" =
-    theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
+    theme === "system"
+      ? snapshot.systemDark
+        ? "dark"
+        : "light"
+      : theme === "gruvbox"
+        ? "dark"
+        : theme;
 
   const setTheme = useCallback((next: Theme) => {
     if (!hasThemeStorage()) return;
