@@ -6,22 +6,6 @@ import * as CodexError from "../errors.ts";
 
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
-function normalizeLegacyServiceTierPayload<A>(payload: A): A {
-  if (payload === null || typeof payload !== "object") {
-    return payload;
-  }
-
-  const record = payload as Record<string, unknown>;
-  let next: Record<string, unknown> | undefined;
-  if (record.serviceTier === "priority") {
-    next = { ...record, serviceTier: "fast" };
-  }
-  if (record.service_tier === "priority") {
-    next = { ...(next ?? record), service_tier: "fast" };
-  }
-  return (next ?? payload) as A;
-}
-
 export const JsonRpcId = Schema.Union([Schema.Number, Schema.String]);
 
 export const JsonRpcError = Schema.Struct({
@@ -77,7 +61,7 @@ export const encodeOptionalPayload = <A, I>(
     );
   }
 
-  return Schema.encodeEffect(schema)(normalizeLegacyServiceTierPayload(payload)).pipe(
+  return Schema.encodeEffect(schema)(payload).pipe(
     Effect.mapError((error) =>
       CodexError.CodexAppServerRequestError.invalidParams(
         `Invalid ${method} payload: ${formatSchemaIssue(error.issue)}`,
