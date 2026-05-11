@@ -68,7 +68,6 @@ const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartP
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
-type CodexServiceTier = EffectCodexSchema.V2ThreadStartParams__ServiceTier;
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
 type CodexThreadItem =
@@ -84,7 +83,7 @@ export interface CodexSessionRuntimeOptions {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
-  readonly serviceTier?: string | undefined;
+  readonly serviceTier?: EffectCodexSchema.V2ThreadStartParams__ServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
 }
 
@@ -95,7 +94,7 @@ export interface CodexSessionRuntimeSendTurnInput {
     readonly url: string;
   }>;
   readonly model?: string;
-  readonly serviceTier?: string | undefined;
+  readonly serviceTier?: EffectCodexSchema.V2TurnStartParams__ServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
   readonly interactionMode?: ProviderInteractionMode;
 }
@@ -269,29 +268,16 @@ function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
-  readonly serviceTier: unknown;
+  readonly serviceTier: EffectCodexSchema.V2ThreadStartParams__ServiceTier | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const serviceTier = normalizeCodexServiceTier(input.serviceTier);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
-    ...(serviceTier ? { serviceTier } : {}),
+    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
-}
-
-function normalizeCodexServiceTier(input: unknown): CodexServiceTier | undefined {
-  switch (input) {
-    case "fast":
-    case "flex":
-      return input;
-    case "priority":
-      return "fast";
-    default:
-      return undefined;
-  }
 }
 
 function runtimeModeToTurnSandboxPolicy(
@@ -345,7 +331,7 @@ export function buildTurnStartParams(input: {
     readonly url: string;
   }>;
   readonly model?: string;
-  readonly serviceTier?: unknown;
+  readonly serviceTier?: EffectCodexSchema.V2TurnStartParams__ServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
 }): Effect.Effect<
@@ -369,7 +355,6 @@ export function buildTurnStartParams(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
   });
-  const serviceTier = normalizeCodexServiceTier(input.serviceTier);
 
   return Schema.decodeUnknownEffect(CodexTurnStartParamsWithCollaborationMode)({
     threadId: input.threadId,
@@ -377,7 +362,7 @@ export function buildTurnStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
     ...(input.model ? { model: input.model } : {}),
-    ...(serviceTier ? { serviceTier } : {}),
+    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
@@ -432,7 +417,7 @@ export const openCodexThread = (input: {
   readonly runtimeMode: RuntimeMode;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
-  readonly serviceTier: unknown;
+  readonly serviceTier: EffectCodexSchema.V2ThreadStartParams__ServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
