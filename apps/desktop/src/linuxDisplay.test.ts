@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as FS from "node:fs/promises";
 import * as Net from "node:net";
 import * as OS from "node:os";
