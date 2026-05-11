@@ -1,3 +1,6 @@
+import assert from "node:assert/strict";
+import nodePath from "node:path";
+
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -7,9 +10,11 @@ import * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
+import * as CodexRpc from "./_generated/meta.gen.ts";
+import { encodeOptionalPayload } from "./_internal/shared.ts";
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
@@ -82,7 +87,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
           cwds: [process.cwd()],
         });
         assert.equal(skills.data.length, 1);
-        assert.equal(skills.data[0]?.cwd, process.cwd());
+        assert.equal(skills.data[0]?.cwd, nodePath.join(import.meta.dirname, ".."));
 
         return {
           account,
@@ -149,6 +154,24 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
 
       assert.equal(initialized.userAgent, "mock-codex-app-server");
+    }),
+  );
+
+  it.effect("normalizes legacy priority service tier before encoding client requests", () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeOptionalPayload(
+        "thread/start",
+        CodexRpc.CLIENT_REQUEST_PARAMS["thread/start"],
+        {
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          model: "gpt-5.5",
+          serviceTier: "priority",
+        } as never,
+      );
+
+      assert.equal((encoded as { readonly serviceTier?: unknown }).serviceTier, "fast");
     }),
   );
 });
