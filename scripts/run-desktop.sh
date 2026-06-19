@@ -41,15 +41,15 @@ fi
 
 cd "$ROOT_DIR"
 
-if [[ ! -f "apps/desktop/dist-electron/main.js" ]] || \
-   [[ ! -f "apps/desktop/dist-electron/preload.js" ]] || \
+if [[ ! -f "apps/desktop/dist-electron/main.cjs" ]] || \
+   [[ ! -f "apps/desktop/dist-electron/preload.cjs" ]] || \
    [[ ! -f "apps/server/dist/bin.mjs" ]] || \
    { [[ ! -f "apps/server/dist/client/index.html" ]] && [[ ! -f "apps/web/dist/index.html" ]]; }; then
   echo "Building desktop runtime artifacts for non-dev launch"
-  bun run build --filter=@t3tools/web --filter=@t3tools/desktop --filter=t3
+  pnpm exec vp run --filter @t3tools/web --filter @t3tools/desktop --filter t3 build
 fi
 
 export T3CODE_DEVICE_SCALE_FACTOR="${T3CODE_DEVICE_SCALE_FACTOR:-1.25}"
 
 echo "Launching t3code desktop from built artifacts"
-exec bun run start:desktop -- "${FORWARD_ARGS[@]}"
+exec pnpm run start:desktop -- "${FORWARD_ARGS[@]}"

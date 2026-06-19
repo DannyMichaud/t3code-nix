@@ -67,5 +67,5 @@ if [[ "$MODE" == "dev:desktop" ]]; then
   export T3CODE_DEVICE_SCALE_FACTOR="${T3CODE_DEVICE_SCALE_FACTOR:-1.25}"
 fi
 
-echo "Launching t3code via bun run ${MODE} (persisted dev shell)"
-exec bun run "$MODE" -- "${FORWARD_ARGS[@]}"
+echo "Launching t3code via pnpm run ${MODE} (persisted dev shell)"
+exec pnpm run "$MODE" -- "${FORWARD_ARGS[@]}"

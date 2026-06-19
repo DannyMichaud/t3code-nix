@@ -43,7 +43,6 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             bash
-            bun
             coreutils
             codex
             electron_40
@@ -51,6 +50,7 @@
             git
             nodejs_24
             pkg-config
+            pnpm
             python3
           ] ++ desktopRuntimeLibs;
 
@@ -59,8 +59,8 @@
 
           shellHook = ''
             echo "t3code-nix dev shell"
-            echo "Run: bun install --frozen-lockfile"
-            echo "Then: bun run dev"
+            echo "Run: pnpm install --frozen-lockfile"
+            echo "Then: pnpm dev"
           '';
         };
 
