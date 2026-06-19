@@ -8,6 +8,51 @@ ROOT_DIR="$(t3code_root_dir)"
 DEV_PROFILE_PATH="$(t3code_dev_profile_path)"
 FORWARD_ARGS=()
 
+t3code_desktop_artifacts_stale() {
+  local artifact source
+  local artifacts=(
+    "apps/desktop/dist-electron/main.cjs"
+    "apps/desktop/dist-electron/preload.cjs"
+    "apps/server/dist/bin.mjs"
+  )
+  local sources=(
+    "package.json"
+    "pnpm-lock.yaml"
+    "pnpm-workspace.yaml"
+    "tsconfig.base.json"
+    "apps/desktop/package.json"
+    "apps/desktop/src"
+    "apps/server/package.json"
+    "apps/server/src"
+    "apps/web/package.json"
+    "apps/web/src"
+    "apps/web/index.html"
+    "packages"
+  )
+
+  if [[ ! -f "apps/server/dist/client/index.html" ]] && [[ ! -f "apps/web/dist/index.html" ]]; then
+    return 0
+  fi
+
+  for artifact in "${artifacts[@]}"; do
+    if [[ ! -f "$artifact" ]]; then
+      return 0
+    fi
+
+    for source in "${sources[@]}"; do
+      if [[ -f "$source" && "$source" -nt "$artifact" ]]; then
+        return 0
+      fi
+
+      if [[ -d "$source" ]] && [[ -n "$(find "$source" -type f -newer "$artifact" -print -quit)" ]]; then
+        return 0
+      fi
+    done
+  done
+
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd)
@@ -41,10 +86,7 @@ fi
 
 cd "$ROOT_DIR"
 
-if [[ ! -f "apps/desktop/dist-electron/main.cjs" ]] || \
-   [[ ! -f "apps/desktop/dist-electron/preload.cjs" ]] || \
-   [[ ! -f "apps/server/dist/bin.mjs" ]] || \
-   { [[ ! -f "apps/server/dist/client/index.html" ]] && [[ ! -f "apps/web/dist/index.html" ]]; }; then
+if t3code_desktop_artifacts_stale; then
   echo "Building desktop runtime artifacts for non-dev launch"
   pnpm exec vp run --filter @t3tools/web --filter @t3tools/desktop --filter t3 build
 fi

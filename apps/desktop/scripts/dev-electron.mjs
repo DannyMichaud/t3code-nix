@@ -2,7 +2,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { watch } from "node:fs";
 import { join } from "node:path";
 
-import { desktopDir, resolveDevProtocolClient, resolveElectronPath } from "./electron-launcher.mjs";
+import {
+  desktopDir,
+  getElectronDisplayArgs,
+  resolveDevProtocolClient,
+  resolveElectronPath,
+} from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
@@ -39,6 +44,7 @@ await waitForResources({
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const displayArgs = getElectronDisplayArgs(childEnv);
 const devProtocolClient = resolveDevProtocolClient();
 if (devProtocolClient) {
   childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
@@ -74,8 +80,8 @@ function startApp() {
   }
 
   const electronArgs = remoteDebuggingPort
-    ? [`--remote-debugging-port=${remoteDebuggingPort}`]
-    : [];
+    ? [...displayArgs, `--remote-debugging-port=${remoteDebuggingPort}`]
+    : displayArgs;
   const launchArgs = devProtocolClient
     ? electronArgs
     : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
