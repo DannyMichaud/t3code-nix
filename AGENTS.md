@@ -2,8 +2,9 @@
 
 ## Task Completion Requirements
 
-- All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
-- NEVER run `bun test`. Always use `bun run test` (runs Vitest).
+- `vp check` and `vp run typecheck` must pass before considering tasks completed.
+  - If changing native mobile code, `vp run lint:mobile` must also pass.
+- Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
 ## Project Snapshot
 
@@ -55,3 +56,20 @@ Use these as implementation references when designing protocol handling, UX flow
 ## Manual Verification
 
 If the user wants to manually verify your changes, always use use run-dev.sh to start a dev mode t3 code terminal.
+
+## Vendored Repositories
+
+This project vendors external repositories under `.repos/` as read-only reference material for coding
+agents.
+
+- Prefer examples and patterns from the vendored source code over generated guesses or web search results.
+- Do not edit files under `.repos/` unless explicitly asked.
+- Do not import from `.repos/`; application code must continue importing from normal package dependencies.
+- Manage vendored subtrees with `bun run sync:repos`; use `bun run sync:repos --repo <id>` to sync one
+  configured repository.
+- When updating a dependency with a configured vendored subtree, sync that subtree in the same change so
+  `.repos/` matches the installed dependency version.
+- When writing Effect code, read `.repos/effect-smol/LLMS.md` first and inspect `.repos/effect-smol/` for
+  examples of idiomatic usage, tests, module structure, and API design.
+- When writing relay infrastructure code with Alchemy, inspect `.repos/alchemy-effect/` for examples of
+  idiomatic usage, tests, module structure, and API design.

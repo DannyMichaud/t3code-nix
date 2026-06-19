@@ -15,6 +15,7 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
 
 import { resolveLinuxWaylandEnvironment } from "../src/linuxDisplay.ts";
 
@@ -142,7 +143,7 @@ function readJson(path) {
 }
 
 function buildMacLauncher(electronBinaryPath) {
-  const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
+  const sourceAppBundlePath = resolve(dirname(electronBinaryPath), "../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
   const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
@@ -176,6 +177,8 @@ function buildMacLauncher(electronBinaryPath) {
 }
 
 export function resolveElectronPath() {
+  ensureElectronRuntime();
+
   const require = createRequire(import.meta.url);
   const electronBinaryPath = require("electron");
 
