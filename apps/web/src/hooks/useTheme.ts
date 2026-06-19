@@ -115,7 +115,7 @@ function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
   const desktopTheme: DesktopTheme = theme === "gruvbox-dark" ? "dark" : theme;
-  if (!bridge || lastDesktopTheme === desktopTheme) {
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === desktopTheme) {
     return;
   }
 
