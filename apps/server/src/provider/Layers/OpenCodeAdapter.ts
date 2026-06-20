@@ -8,6 +8,7 @@ import {
   RuntimeItemId,
   RuntimeRequestId,
   ThreadId,
+  type ThreadTokenUsageSnapshot,
   type ToolLifecycleItemType,
   TurnId,
   type UserInputQuestion,
@@ -76,6 +77,14 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  /**
+   * Per-session cache of `provider/model -> context window` entries, populated
+   * lazily from `client.provider.list()` the first time we see an assistant
+   * message for a model we haven't observed yet. Lets the token-usage emitter
+   * resolve `maxTokens` without re-fetching the full provider catalog on every
+   * `message.updated` event.
+   */
+  readonly contextWindowByModel: Map<string, number>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
@@ -316,6 +325,96 @@ export function appendOpenCodeAssistantTextDelta(
   return {
     nextText: previousText + delta,
     deltaToEmit: delta,
+  };
+}
+
+/**
+ * Token usage shape stored on an OpenCode assistant message. Mirrors
+ * `AssistantMessage["tokens"]` from `@opencode-ai/sdk/v2` but kept structurally
+ * loose so the helper can accept partial/test-fixture payloads without forcing
+ * every caller to satisfy the full SDK type.
+ */
+export interface OpenCodeAssistantTokenUsage {
+  readonly total?: number;
+  readonly input: number;
+  readonly output: number;
+  readonly reasoning: number;
+  readonly cache: {
+    readonly read: number;
+    readonly write: number;
+  };
+}
+
+/**
+ * Normalize an OpenCode assistant-message `tokens` payload into the shared
+ * {@link ThreadTokenUsageSnapshot} shape that drives the context-window meter.
+ *
+ * OpenCode's `tokens.input` excludes cached tokens (the SDK subtracts
+ * `cache.read + cache.write` before persisting it), so the full input context
+ * for the turn — i.e. the value that actually fills the model's context
+ * window — is `input + cache.read + cache.write`. We surface that as both
+ * `inputTokens` and the basis for `usedTokens`, mirroring how the Claude
+ * adapter sums `input_tokens + cache_creation + cache_read`.
+ *
+ * `totalProcessedTokens` prefers the provider-reported `tokens.total` and
+ * falls back to `contextTokens + output + reasoning` (OpenCode splits
+ * reasoning out of `output`, so we add it back to get the full output volume).
+ *
+ * Returns `undefined` when there is nothing to report (no tokens processed or
+ * every field is zero/non-finite), so the caller can skip emitting a
+ * `thread.token-usage.updated` event entirely.
+ */
+export function normalizeOpenCodeTokenUsage(
+  tokens: OpenCodeAssistantTokenUsage,
+  contextWindow?: number,
+): ThreadTokenUsageSnapshot | undefined {
+  const safe = (value: number | undefined): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? Math.round(value)
+      : 0;
+
+  const nonCachedInputTokens = safe(tokens.input);
+  const cacheReadInputTokens = safe(tokens.cache?.read);
+  const cacheWriteInputTokens = safe(tokens.cache?.write);
+  const outputTokens = safe(tokens.output);
+  const reasoningOutputTokens = safe(tokens.reasoning);
+
+  // OpenCode's persisted `tokens.input` is the non-cached billable input;
+  // the full input context for the turn (the value that fills the window)
+  // includes cache read + write. We surface that as `inputTokens` to match
+  // the Claude adapter's `input_tokens + cache_creation + cache_read` sum.
+  const inputTokens = nonCachedInputTokens + cacheReadInputTokens + cacheWriteInputTokens;
+  const fallbackTotalProcessed = inputTokens + outputTokens + reasoningOutputTokens;
+  const totalProcessedTokens =
+    safe(tokens.total) > 0 ? safe(tokens.total) : fallbackTotalProcessed;
+  if (totalProcessedTokens <= 0) {
+    return undefined;
+  }
+
+  const maxTokens =
+    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+      ? Math.round(contextWindow)
+      : undefined;
+  const usedTokens =
+    maxTokens !== undefined ? Math.min(totalProcessedTokens, maxTokens) : totalProcessedTokens;
+
+  return {
+    usedTokens,
+    lastUsedTokens: usedTokens,
+    ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
+    ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(cacheReadInputTokens > 0 ? { cachedInputTokens: cacheReadInputTokens } : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {}),
+    ...(reasoningOutputTokens > 0 ? { reasoningOutputTokens } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    // OpenCode tokens are already per-message, so `last*` mirrors `*`.
+    ...(inputTokens > 0 ? { lastInputTokens: inputTokens } : {}),
+    ...(cacheReadInputTokens > 0 ? { lastCachedInputTokens: cacheReadInputTokens } : {}),
+    ...(outputTokens > 0 ? { lastOutputTokens: outputTokens } : {}),
+    ...(reasoningOutputTokens > 0 ? { lastReasoningOutputTokens: reasoningOutputTokens } : {}),
+    // OpenCode defaults to `compaction.auto: true`; we treat that as the
+    // common case so the meter shows the "auto-compacts" hint.
+    compactsAutomatically: true,
   };
 }
 
@@ -641,6 +740,41 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    /**
+     * Resolve the context-window cap for a `providerID/modelID` pair, using the
+     * per-session cache and falling back to a single `client.provider.list()`
+     * fetch that warms the cache for every model the provider exposes. The
+     * fetch runs at most once per session (subsequent calls are map lookups);
+     * if it fails we log and return `undefined` so the meter still renders
+     * without a `maxTokens` ring rather than dropping the usage event.
+     */
+    const resolveContextWindow = Effect.fn("resolveContextWindow")(function* (
+      context: OpenCodeSessionContext,
+      providerID: string,
+      modelID: string,
+    ) {
+      const key = `${providerID}/${modelID}`;
+      if (context.contextWindowByModel.has(key)) {
+        return context.contextWindowByModel.get(key);
+      }
+      const list = yield* runOpenCodeSdk("provider.list", () =>
+        context.client.provider.list({ directory: context.directory }),
+      ).pipe(Effect.catchCause(() => Effect.void));
+      const all = list?.data?.all;
+      if (!all) {
+        return undefined;
+      }
+      for (const provider of all) {
+        for (const [modelKey, model] of Object.entries(provider.models ?? {})) {
+          const limit = model?.limit?.context;
+          if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+            context.contextWindowByModel.set(`${provider.id}/${modelKey}`, Math.round(limit));
+          }
+        }
+      }
+      return context.contextWindowByModel.get(key);
+    });
+
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
@@ -673,6 +807,34 @@ export function makeOpenCodeAdapter(
                 continue;
               }
               yield* emitAssistantTextDelta(context, part, turnId, event);
+            }
+
+            // Surface context-window usage from the assistant message's
+            // `tokens` payload. OpenCode emits `message.updated` as the
+            // assistant row is finalized (with `tokens` populated), so this
+            // is the right hook to keep the meter in sync with each turn.
+            const info = event.properties.info;
+            if (info.tokens) {
+              const contextWindow = yield* resolveContextWindow(
+                context,
+                info.providerID,
+                info.modelID,
+              );
+              const normalizedUsage = normalizeOpenCodeTokenUsage(info.tokens, contextWindow);
+              if (normalizedUsage) {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    turnId,
+                    itemId: info.id,
+                    raw: event,
+                  })),
+                  type: "thread.token-usage.updated",
+                  payload: {
+                    usage: normalizedUsage,
+                  },
+                });
+              }
             }
           }
           break;
@@ -1120,6 +1282,7 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          contextWindowByModel: new Map(),
           turns: [],
           activeTurnId: undefined,
           activeAgent: undefined,

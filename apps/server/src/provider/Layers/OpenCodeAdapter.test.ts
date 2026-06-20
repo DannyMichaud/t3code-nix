@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
+import { describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -33,6 +33,8 @@ import {
   appendOpenCodeAssistantTextDelta,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
+  normalizeOpenCodeTokenUsage,
+  type OpenCodeAssistantTokenUsage,
 } from "./OpenCodeAdapter.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
@@ -63,6 +65,22 @@ const runtimeMock = {
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
     subscribedEvents: [] as unknown[],
+    providerListCalls: [] as Array<string | undefined>,
+    /**
+     * Override to control the response returned by the mocked
+     * `client.provider.list`. When `null`, the call resolves to `undefined`
+     * (mirroring a server that returned no body), which exercises the
+     * adapter's "no maxTokens available" path.
+     */
+    providerListResponse: null as
+      | null
+      | {
+          readonly all: ReadonlyArray<{
+            readonly id: string;
+            readonly models: Readonly<Record<string, { readonly limit: { readonly context: number } }>>;
+          }>;
+        },
+    providerListError: null as Error | null,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -76,6 +94,9 @@ const runtimeMock = {
     this.state.closeError = null;
     this.state.messages = [];
     this.state.subscribedEvents = [];
+    this.state.providerListCalls = [];
+    this.state.providerListResponse = null;
+    this.state.providerListError = null;
   },
 };
 
@@ -166,6 +187,17 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             }
           })(),
         }),
+      },
+      provider: {
+        list: async (input?: { readonly directory?: string }) => {
+          runtimeMock.state.providerListCalls.push(input?.directory);
+          if (runtimeMock.state.providerListError) {
+            throw runtimeMock.state.providerListError;
+          }
+          return runtimeMock.state.providerListResponse === null
+            ? { data: undefined }
+            : { data: runtimeMock.state.providerListResponse };
+        },
       },
     }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
   loadOpenCodeInventory: () =>
@@ -837,4 +869,334 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.deepEqual(closeCallsDuringRun, []);
     }),
   );
+
+  it.effect("emits thread.token-usage.updated for assistant messages with tokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-token-usage");
+      runtimeMock.state.providerListResponse = {
+        all: [
+          {
+            id: "anthropic",
+            models: {
+              "claude-sonnet-4-5": { limit: { context: 200_000 } },
+            },
+          },
+        ],
+      };
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-token-usage",
+              role: "assistant",
+              providerID: "anthropic",
+              modelID: "claude-sonnet-4-5",
+              tokens: {
+                total: 4242,
+                input: 1500,
+                output: 300,
+                reasoning: 120,
+                cache: { read: 2000, write: 320 },
+              },
+            },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.filter((event) => event.type === "thread.token-usage.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const usageEvents = Array.from(
+        yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")),
+      );
+      assert.equal(usageEvents.length, 1);
+      const usageEvent = usageEvents[0];
+      assert.equal(usageEvent?.type, "thread.token-usage.updated");
+      if (usageEvent?.type !== "thread.token-usage.updated") {
+        throw new Error("expected thread.token-usage.updated event");
+      }
+      // 4242 fits under the 200k context window, so usedTokens == totalProcessed
+      // and totalProcessedTokens is omitted (only surfaced when it exceeds the cap).
+      assert.equal(usageEvent.payload.usage.usedTokens, 4242);
+      assert.equal(usageEvent.payload.usage.maxTokens, 200_000);
+      assert.equal(usageEvent.payload.usage.totalProcessedTokens, undefined);
+      assert.equal(usageEvent.payload.usage.inputTokens, 3820);
+      assert.equal(usageEvent.payload.usage.cachedInputTokens, 2000);
+      assert.equal(usageEvent.payload.usage.outputTokens, 300);
+      assert.equal(usageEvent.payload.usage.reasoningOutputTokens, 120);
+      assert.equal(usageEvent.payload.usage.compactsAutomatically, true);
+      // provider.list should have been hit exactly once for the session.
+      assert.deepEqual(runtimeMock.state.providerListCalls, [process.cwd()]);
+    }),
+  );
+
+  it.effect("does not emit thread.token-usage.updated when assistant tokens are all zero", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-token-usage-empty");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-token-usage-empty",
+              role: "assistant",
+              providerID: "anthropic",
+              modelID: "claude-sonnet-4-5",
+              tokens: {
+                input: 0,
+                output: 0,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          },
+        },
+      ];
+
+      // Collect the first 2 events (session.started + thread.started, emitted
+      // synchronously during startSession). The event pump processes the
+      // message.updated event asynchronously — after advanceTestClock gives
+      // it time — but since all tokens are zero, no thread.token-usage.updated
+      // event is emitted. The first 2 events should never include one.
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      // Let the event-pump fiber process the subscribed message.updated event.
+      yield* advanceTestClock(50);
+
+      const events = Array.from(
+        yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")),
+      );
+      assert.equal(events.length, 2);
+      assert.equal(
+        events.some((event) => event.type === "thread.token-usage.updated"),
+        false,
+      );
+    }),
+  );
+
+  it.effect("still emits token usage when provider.list fails (no maxTokens)", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-token-usage-no-list");
+      runtimeMock.state.providerListError = new Error("provider.list unavailable");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-token-usage-no-list",
+              role: "assistant",
+              providerID: "anthropic",
+              modelID: "claude-sonnet-4-5",
+              tokens: {
+                input: 1000,
+                output: 50,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.filter((event) => event.type === "thread.token-usage.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const usageEvents = Array.from(
+        yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")),
+      );
+      assert.equal(usageEvents.length, 1);
+      const usageEvent = usageEvents[0];
+      if (usageEvent?.type !== "thread.token-usage.updated") {
+        throw new Error("expected thread.token-usage.updated event");
+      }
+      // No context window available, so usedTokens mirrors totalProcessed
+      // and maxTokens is absent.
+      assert.equal(usageEvent.payload.usage.usedTokens, 1050);
+      assert.equal(usageEvent.payload.usage.maxTokens, undefined);
+      assert.equal(usageEvent.payload.usage.totalProcessedTokens, undefined);
+      assert.equal(usageEvent.payload.usage.inputTokens, 1000);
+      assert.equal(usageEvent.payload.usage.outputTokens, 50);
+    }),
+  );
+
+  it.effect("clamps usedTokens to the resolved context window", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-token-usage-clamp");
+      runtimeMock.state.providerListResponse = {
+        all: [
+          {
+            id: "openai",
+            models: {
+              "gpt-5": { limit: { context: 10_000 } },
+            },
+          },
+        ],
+      };
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-token-usage-clamp",
+              role: "assistant",
+              providerID: "openai",
+              modelID: "gpt-5",
+              tokens: {
+                // total exceeds the 10k context window; usedTokens should clamp.
+                total: 12_000,
+                input: 11_500,
+                output: 500,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.filter((event) => event.type === "thread.token-usage.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const usageEvents = Array.from(
+        yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")),
+      );
+      const usageEvent = usageEvents[0];
+      if (usageEvent?.type !== "thread.token-usage.updated") {
+        throw new Error("expected thread.token-usage.updated event");
+      }
+      assert.equal(usageEvent.payload.usage.usedTokens, 10_000);
+      assert.equal(usageEvent.payload.usage.maxTokens, 10_000);
+      assert.equal(usageEvent.payload.usage.totalProcessedTokens, 12_000);
+      // provider.list should be called once and the result cached for
+      // subsequent assistant messages on the same model.
+      assert.deepEqual(runtimeMock.state.providerListCalls, [process.cwd()]);
+    }),
+  );
+});
+
+describe("normalizeOpenCodeTokenUsage", () => {
+  it("returns undefined when nothing was processed", () => {
+    const empty: OpenCodeAssistantTokenUsage = {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    };
+    assert.equal(normalizeOpenCodeTokenUsage(empty), undefined);
+    assert.equal(normalizeOpenCodeTokenUsage(empty, 200_000), undefined);
+  });
+
+  it("treats non-finite token fields as zero instead of propagating NaN", () => {
+    const usage: OpenCodeAssistantTokenUsage = {
+      total: Number.POSITIVE_INFINITY,
+      input: Number.NaN,
+      output: 10,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    };
+    const result = normalizeOpenCodeTokenUsage(usage);
+    assert.equal(result?.usedTokens, 10);
+    assert.equal(result?.outputTokens, 10);
+    // inputTokens is omitted (undefined) when all input-side fields are 0.
+    assert.equal(result?.inputTokens, undefined);
+  });
+
+  it("includes cache read+write in inputTokens and totals", () => {
+    const usage: OpenCodeAssistantTokenUsage = {
+      input: 100,
+      output: 20,
+      reasoning: 5,
+      cache: { read: 500, write: 50 },
+    };
+    const result = normalizeOpenCodeTokenUsage(usage);
+    // No tokens.total, so totalProcessed falls back to
+    // inputTokens (650) + output (20) + reasoning (5) = 675.
+    assert.equal(result?.usedTokens, 675);
+    assert.equal(result?.totalProcessedTokens, undefined);
+    assert.equal(result?.inputTokens, 650);
+    assert.equal(result?.cachedInputTokens, 500);
+    assert.equal(result?.outputTokens, 20);
+    assert.equal(result?.reasoningOutputTokens, 5);
+  });
+
+  it("clamps usedTokens to the context window while preserving totalProcessed", () => {
+    const usage: OpenCodeAssistantTokenUsage = {
+      total: 150_000,
+      input: 140_000,
+      output: 10_000,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    };
+    const result = normalizeOpenCodeTokenUsage(usage, 100_000);
+    assert.equal(result?.usedTokens, 100_000);
+    assert.equal(result?.maxTokens, 100_000);
+    assert.equal(result?.totalProcessedTokens, 150_000);
+  });
+
+  it("ignores non-positive context window values", () => {
+    const usage: OpenCodeAssistantTokenUsage = {
+      input: 100,
+      output: 10,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    };
+    assert.equal(normalizeOpenCodeTokenUsage(usage, 0)?.maxTokens, undefined);
+    assert.equal(normalizeOpenCodeTokenUsage(usage, -5)?.maxTokens, undefined);
+    assert.equal(
+      normalizeOpenCodeTokenUsage(usage, Number.NaN)?.maxTokens,
+      undefined,
+    );
+  });
 });
