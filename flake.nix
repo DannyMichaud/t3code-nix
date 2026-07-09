@@ -39,12 +39,14 @@
           nss
           pango
         ]);
-      in {
+      in
+      {
         devShells.default = pkgs.mkShell {
+          # Provider CLIs are user-managed. Pinning Codex here would shadow the
+          # user's installed version and can hide newly rolled-out models.
           packages = with pkgs; [
             bash
             coreutils
-            codex
             electron_40
             gcc
             git
@@ -66,7 +68,7 @@
 
         formatter = pkgs.nixpkgs-fmt;
 
-        checks.flake-eval = pkgs.runCommand "t3code-nix-flake-eval" {} ''
+        checks.flake-eval = pkgs.runCommand "t3code-nix-flake-eval" { } ''
           mkdir -p "$out"
         '';
       });
