@@ -90,19 +90,31 @@ const make = Effect.gen(function* () {
           return;
         }
 
-        if (window.isMinimized()) {
+        const minimized = window.isMinimized();
+        if (minimized) {
           window.restore();
         }
 
-        if (!window.isVisible()) {
-          window.show();
-        }
-
         if (process.platform === "darwin") {
+          if (!window.isVisible()) {
+            window.show();
+          }
           Electron.app.focus({ steal: true });
+          window.focus();
+        } else if (process.platform === "linux") {
+          // Map hidden windows without demanding focus so the compositor does
+          // not paint an urgent border or steal focus from the workspace the
+          // launcher just centered. `show()` would request activation; use
+          // `showInactive()` so an already-centered column stays focused.
+          if (!minimized && !window.isVisible()) {
+            window.showInactive();
+          }
+        } else {
+          if (!window.isVisible()) {
+            window.show();
+          }
+          window.focus();
         }
-
-        window.focus();
       }),
     sendAll: (channel, ...args) =>
       Effect.sync(() => {

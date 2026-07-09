@@ -74,6 +74,10 @@ describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     const claude = ProviderDriverKind.make("claudeAgent");
     expect(normalizeModelSlug("gpt-5-codex")).toBe("gpt-5.4");
+    expect(normalizeModelSlug("5.6")).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("gpt-5.6")).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("5.6-terra")).toBe("gpt-5.6-terra");
+    expect(normalizeModelSlug("5.6-luna")).toBe("gpt-5.6-luna");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", claude)).toBe("claude-sonnet-4-6");
   });
@@ -109,10 +113,22 @@ describe("resolveModelSlugForProvider", () => {
 describe("resolveSelectableModel", () => {
   it("resolves exact slugs, labels, and aliases", () => {
     const options = [
+      { slug: "gpt-5.6-sol", name: "GPT-5.6-Sol" },
+      { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra" },
+      { slug: "gpt-5.6-luna", name: "GPT-5.6-Luna" },
       { slug: "gpt-5.5", name: "GPT-5.5" },
       { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
       { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
     ];
+    expect(resolveSelectableModel(ProviderDriverKind.make("codex"), "5.6", options)).toBe(
+      "gpt-5.6-sol",
+    );
+    expect(resolveSelectableModel(ProviderDriverKind.make("codex"), "5.6-terra", options)).toBe(
+      "gpt-5.6-terra",
+    );
+    expect(resolveSelectableModel(ProviderDriverKind.make("codex"), "5.6-luna", options)).toBe(
+      "gpt-5.6-luna",
+    );
     expect(resolveSelectableModel(ProviderDriverKind.make("codex"), "5.5", options)).toBe(
       "gpt-5.5",
     );

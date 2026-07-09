@@ -17,7 +17,7 @@ import {
 } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-const UPSTREAM_REF = "07b695190f30a450e4921f71f77473e564395c59";
+const UPSTREAM_REF = "767822446c7a594caa19609ca435281a9ec67e0d";
 const USER_AGENT = "effect-codex-app-server-generator";
 const GITHUB_API_BASE =
   "https://api.github.com/repos/openai/codex/contents/codex-rs/app-server-protocol";
@@ -348,10 +348,13 @@ function resolveResponseTypeName(
   const overrides: Record<string, string> = {
     "account/logout": "LogoutAccountResponse",
     "account/rateLimits/read": "GetAccountRateLimitsResponse",
+    "account/usage/read": "GetAccountTokenUsageResponse",
+    "account/workspaceMessages/read": "GetWorkspaceMessagesResponse",
     "config/batchWrite": "ConfigWriteResponse",
     "config/mcpServer/reload": "McpServerRefreshResponse",
     "config/value/write": "ConfigWriteResponse",
     "configRequirements/read": "ConfigRequirementsReadResponse",
+    "externalAgentConfig/import/readHistories": "ExternalAgentConfigImportHistoriesReadResponse",
   };
 
   const override = overrides[method];
@@ -744,15 +747,19 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
 
   yield* Effect.log(`Generated Codex App Server schemas from ${UPSTREAM_REF}`);
 
+  const path = yield* Path.Path;
+  const vpBin = path.join(import.meta.dirname, "..", "node_modules", "vite-plus", "bin", "vp");
   yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
-    Effect.flatMap((spawner) => spawner.spawn(ChildProcess.make("bun", ["oxfmt", generatedDir]))),
+    Effect.flatMap((spawner) =>
+      spawner.spawn(ChildProcess.make(process.execPath, [vpBin, "fmt", generatedDir])),
+    ),
     Effect.flatMap((child) => child.exitCode),
     Effect.tap((code) =>
       code === 0
         ? Effect.void
         : Effect.fail(
             new GeneratorError({
-              detail: `oxfmt failed with exit code ${code}`,
+              detail: `vp fmt failed with exit code ${code}`,
             }),
           ),
     ),

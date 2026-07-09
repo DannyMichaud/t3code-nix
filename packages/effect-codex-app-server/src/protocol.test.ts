@@ -10,8 +10,10 @@ import { assert, it } from "@effect/vitest";
 
 import * as CodexError from "./errors.ts";
 import * as CodexProtocol from "./protocol.ts";
+import * as CodexSchema from "./schema.ts";
 import { makeInMemoryStdio } from "./_internal/stdio.ts";
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
+const decodeModelListResponse = Schema.decodeUnknownSync(CodexSchema.V2ModelListResponse);
 
 const encoder = new TextEncoder();
 
@@ -20,6 +22,32 @@ const encodeJsonl = (value: unknown) => encoder.encode(`${encodeUnknownJsonStrin
 const decodeJson = Schema.decodeEffect(Schema.UnknownFromJsonString);
 
 it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
+  it("decodes GPT-5.6 model catalog reasoning efforts", () => {
+    const decoded = decodeModelListResponse({
+      data: [
+        {
+          id: "gpt-5.6-sol",
+          model: "gpt-5.6-sol",
+          displayName: "GPT-5.6-Sol",
+          description: "Latest frontier agentic coding model.",
+          hidden: false,
+          isDefault: true,
+          defaultReasoningEffort: "low",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "max", description: "Maximum reasoning depth" },
+            { reasoningEffort: "ultra", description: "Automatic task delegation" },
+          ],
+        },
+      ],
+      nextCursor: null,
+    });
+
+    assert.deepEqual(
+      decoded.data[0]?.supportedReasoningEfforts.map(({ reasoningEffort }) => reasoningEffort),
+      ["max", "ultra"],
+    );
+  });
+
   it.effect(
     "encodes requests without a jsonrpc field and routes inbound requests and notifications",
     () =>
